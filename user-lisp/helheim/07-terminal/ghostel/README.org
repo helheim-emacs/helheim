@@ -17,4 +17,6 @@ Install and cofigure [[https://github.com/dakra/ghostel][Ghostel]] — a [[https
   - Start a new terminal or switch to an existing one.
   - With =M-u=, always create a new terminal.
 
+- =SPC p t= :: Start terminal in the current project's root.
+
 See [[https://github.com/anuvyklack/hel-ghostel][hel-ghostel]] documentation for how Ghostel and Hel are integrates.
