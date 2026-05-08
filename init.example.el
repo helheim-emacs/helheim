@@ -136,6 +136,7 @@
 
 ;;; Terminal emulators
 
+; (require 'helheim-eat)     ; written in emacs-lisp
 ; (require 'helheim-ghostel) ; based on libghostty (Zig) -- same as in Ghostty
 ; (require 'helheim-vterm)   ; based on libvterm (C) -- same as in Neovim
 
