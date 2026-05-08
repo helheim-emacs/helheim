@@ -1,0 +1,25 @@
+* helheim-eat
+:PROPERTIES:
+:DIR:      assets
+:END:
+
+[[attachment:20260420T182305--eat.png]]
+
+- Semi-Char Mode ::
+  The default mode where most inputs will be sent to the terminal. This mode
+  does 90% of the job but if sometimes you have a weird mix of alt and control
+  input combinations to send, use *Char Mode*.
+
+- Char Mode (=C-c M-d=) ::
+  Every input you make except of the =C-M-m= and =M-RET= will be sent to the
+  terminal. This means you can open ~vim~ within the terminal buffer and it works
+  absolutely perfectly.
+
+- Line Mode (=C-c C-j=) ::
+  In this mode, similar to ~comint-mode~, input is sent one line at once: you
+  first compose line in Emacs buffer using all Hel and Emacs commands and then
+  send it to terminal whole at once.
+
+- Emacs Mode (=C-c C-e=) ::
+  The buffer becomes "frozen" for you to search in the text, copy it, scroll
+  back, etc.
