@@ -1,0 +1,448 @@
+* helheim-gnus
+
+#+begin_quote
+[!NOTE]
+This module configures Gnus as a *Gmail + lieer + notmuch* frontend: Gmail is
+the mail store, [[https://github.com/gauteh/lieer][lieer]] keeps a local maildir mirror of it, and [[https://notmuchmail.org/][notmuch]] does all
+indexing and search. Gnus itself neither fetches nor stores mail — it is only
+the reading and composing interface on top of that stack.
+#+end_quote
+
+Gnus configured as a Gmail client, with [[https://github.com/gauteh/lieer][lieer]] mirroring the mailbox and
+[[https://notmuchmail.org/][notmuch]] doing all indexing and search. See the [[file:../notmuch/README.org][helheim-notmuch README]] for
+setting up notmuch, lieer, and ~msmtp~ — this module assumes that
+infrastructure already exists and only configures Gnus on top of it.
+
+** Architecture
+*** The pipeline
+
+lieer keeps one flat maildir in sync with Gmail (no folders); notmuch
+indexes that maildir and tags messages; ~msmtp~ sends outgoing mail, picking
+the account from the =From= header. Gnus itself never fetches mail —
+the ~nnmaildir~ backend is configured with =(get-new-mail nil)= — it only reads
+what lieer has already delivered. ~helheim-gnus-sync~ (below) is what actually
+pulls new mail, by running ~notmuch new~ and letting its hooks drive lieer.
+
+*** Groups are notmuch queries, not folders
+
+Since there are no real folders, every group the user reads is an ~nnselect~
+group whose contents are the live result of a notmuch query. These are
+declared in ~helheim-gnus-saved-searches~ (name, query, subscription level)
+and built by ~helheim-gnus-build-groups~ on ~gnus-started-hook~. Rebuilding is
+idempotent: an existing group has its query refreshed in place, so editing
+a saved search and restarting Gnus is enough — no manual group
+deletion needed.
+
+The one real group (the raw ~nnmaildir~ maildir backing every search) is kept
+at level 6, the default ~gnus-activate-level~, so it stays out of the way
+without being unreachable.
+
+*** Marks are Gmail state, not local notes
+
+This is the part that surprises: Gnus marks are not private annotations,
+they round-trip all the way to Gmail.
+
+| Gnus mark | maildir flag | notmuch tag         | Gmail state |
+|-----------+--------------+---------------------+-------------|
+| read      | =S=            | ~unread~ (absence of) | read        |
+| tick      | =F=            | ~flagged~             | starred     |
+| reply     | =R=            | ~replied~             | replied     |
+
+~nnmaildir~ maps marks onto maildir flags, notmuch turns those into tags, and
+lieer pushes tag changes back to Gmail. So clearing an article's tick in
+Gnus genuinely unstars it in Gmail — it is not a local-only note.
+
+For this to work at all in search-backed groups, ~nnselect~ has to forward marks
+to the underlying backend, which it does not do by default: Gnus only forwards
+marks when a select method declares =server-marks=, and ~nnselect~ doesn't.
+~helheim-gnus.el~ patches the =nnselect= entry in ~gnus-valid-select-methods~
+in place (once ~nnselect~ loads) to add =server-marks=, rather than re-declaring
+the backend, since ~gnus-declare-backend~ only appends and lookups stop at the
+first match.
+
+** Enable module
+#+begin_src emacs-lisp
+(require 'helheim-gnus)
+#+end_src
+
+** Customization
+
+- ~helheim-gnus-account-directory~ :: the lieer-managed maildir directory.
+
+- ~helheim-gnus-notmuch-config~ :: path to the notmuch config, resolved
+  the same way notmuch itself resolves it (=$NOTMUCH_CONFIG=, then
+  =$XDG_CONFIG_HOME/notmuch/$NOTMUCH_PROFILE/config=, then
+  =~/.notmuch-config=).
+
+- ~helheim-gnus-server~ :: The Gnus server the notmuch engine searches against.
+
+- ~helheim-gnus-saved-searches~ :: The list of (name query level) groups.
+
+- ~helheim-gnus-archive-tags~, ~helheim-gnus-trash-tags~, ~helheim-gnus-spam-tags~ ::
+  Notmuch tag edits applied by the commands below. ~helheim-gnus-trash-tags~
+  and ~helheim-gnus-spam-tags~ must match lieer's own trash/spam tag
+  conventions, since lieer's ~remove_local_messages~ means a locally deleted
+  file is simply downloaded again on the next pull.
+
+Generated state (cache, saved articles, ~.newsrc.eld~, drafts, outgoing mail)
+is redirected under ~user-emacs-directory~ (=var/gnus/=) instead of =$HOME=.
+
+** Usage
+*** Sync mail
+
+~helheim-gnus-sync~ runs ~notmuch new~ (whose pre-new hook pulls from Gmail
+via lieer and whose post-new hook pushes local tag changes back to Gmail),
+then refreshes Gnus. Leave the summary buffer before calling it — Gnus only
+writes marks to disk when the summary buffer commits them, not on
+every keypress.
+
+*** Summary-buffer commands
+
+These act on the current article in ~gnus-summary-mode~ by editing notmuch
+tags directly, rather than using Gnus' own expiry:
+
+- ~helheim-gnus-archive~ — remove from inbox.
+- ~helheim-gnus-trash~ — mark for deletion.
+- ~helheim-gnus-spam~ — mark as spam.
+- ~helheim-gnus-toggle-flagged~ — toggle the ~flagged~ tag, i.e. the Gmail star.
+
+None of these are bound to a key by this module yet.
+
+** Keybindings
+
+- =zz= :: ~gnus-recenter~
+
+*** gnus-group-mode-map
+
+| Hel   | Gnus      | Command                                |
+|-------+-----------+----------------------------------------|
+| =q=, =ZZ= | =q=         | ~gnus-group-exit~                        |
+| =Q=, =ZQ= | =Q=         | ~gnus-group-quit~                        |
+| =J=, =]]= | =n=         | ~gnus-group-next-unread-group~           |
+| =K=, =[[= | =p=         | ~gnus-group-prev-unread-group~           |
+| =C-j=   | =N=         | ~gnus-group-next-group~                  |
+| =C-k=   | =P=         | ~gnus-group-prev-group~                  |
+| =C=, =cc= | =m=         | ~gnus-group-mail~                        |
+| =.=     | =.=         | ~gnus-group-first-unread-group~          |
+| n/a   | =,=         | ~gnus-group-best-unread-group~           |
+| =A=     | =M-g M-a=   | ~gnus-activate-all-groups~               |
+| =B=     | =B=         | ~gnus-group-browse-foreign-server~       |
+| =E=     | =M-e=       | ~gnus-group-edit-group~                  |
+| =F=     | =F=         | ~gnus-group-find-new-groups~             |
+| =J=     | =j=         | ~gnus-group-jump-to-group~               |
+| =R=     | (G r)     | ~gnus-group-rename-group~                |
+| =RET=   | =RET=       | ~gnus-group-select-group~                |
+| =, RET= | =SPC=       | ~gnus-group-read-group~                  |
+| =gr=    | =g=         | ~gnus-group-get-new-news-this-group~     |
+| =gR=    | =g=         | ~gnus-group-get-new-news~                |
+| =gu=    | =u=         | ~gnus-group-unsubscribe-current-group~   |
+| =gU=    | =U=         | ~gnus-group-unsubscribe-group~           |
+| =gc=    | =c=         | ~gnus-group-catchup-current~             |
+| =gC=    | =C=         | ~gnus-group-catchup-current-all~         |
+| =gl=    | (G S l)   | ~gnus-group-set-current-level~           |
+| =dd=, =D= | =C-k=       | ~gnus-group-kill-group~                  |
+| =p=, =P=  | =C-y=       | ~gnus-group-yank-group~                  |
+| =m=     | =#=         | ~gnus-group-mark-group~                  |
+| =u=     | =M-#=       | ~gnus-group-unmark-group~                |
+| =U=     | (M U)     | ~gnus-group-unmark-all-groups~           |
+| =M=, =%=  | (M b)     | ~gnus-group-mark-buffer~                 |
+| =, m=   | (M r)     | ~gnus-group-mark-regexp~                 |
+| =s=     | =C-c M-a=   | ~gnus-group-apropos~                     |
+| =S=     | =C-c M-A=   | ~gnus-group-description-apropos~         |
+| =M-s=   | n/a       | ~gnus-group-read-ephemeral-search-group~ |
+| =^=     | =^=         | ~gnus-group-enter-server-mode~           |
+| =g?=    | =H=         | ~gnus-group-help-map~                    |
+
+Grouped relocations:
+
+- Sort (=o= prefix): =oa= alphabet, =ol= level, =om= method, =on= real-name, =or= rank,
+  =os= sort, =ou= unread, =ov= score.
+
+- List (=L= prefix, was upstream =A=): =Ll= level, =Ls= groups, =Lu= all-groups.
+  The Usenet/agent listing commands (=La= active, =Lc= cached, =Lk= killed, =Lz=
+  zombies, =L!= ticked, =L?= dormant, =Lm= / =LM= matching, and the =L/= / =Lf= / =Lp=
+  set-arithmetic submaps) were removed — see [[*Unbound and removed commands]].
+
+- Topic (=T= prefix): =Tn= create, =Tj= jump, =Tr= rename, =Td= delete;
+  =zo= / =zc= show/hide topic. Topic sort under =To{a,u,l,v,r,m,e,s}=.
+
+*** gnus-summary-mode-map
+
+| Hel        | Gnus       | Command                                     |
+|------------+------------+---------------------------------------------|
+| =q=, =ZZ=      | =q=          | ~gnus-summary-exit~                           |
+| =Q=, =ZQ=      | =Q=          | ~gnus-summary-exit-no-update~                 |
+| =g?=         | =H=          | ~gnus-summary-help-map~                       |
+| =TAB=        | n/a        | ~gnus-summary-widget-forward~                 |
+| =<backtab>=  | n/a        | ~gnus-summary-widget-backward~                |
+| =SPC=        | =SPC=        | ~gnus-summary-next-page~                      |
+| =DEL=, =S-SPC= | =DEL=, =S-SPC= | ~gnus-summary-prev-page~                      |
+| =RET=        | =RET=        | ~gnus-summary-scroll-up~                      |
+| =gk=, =[[=     | =p=          | ~gnus-summary-prev-unread-article~            |
+| =gj=, =]]=     | =n=          | ~gnus-summary-next-unread-article~            |
+| ={=          | =M-b=        | ~gnus-summary-prev-thread~                    |
+| =}=          | =M-f=        | ~gnus-summary-next-thread~                    |
+| =C-k=        | =P=          | ~gnus-summary-prev-article~                   |
+| =C-j=        | =N=          | ~gnus-summary-next-article~                   |
+| =m=          | =#=          | ~gnus-summary-mark-as-processable~            |
+| =M=          | (M H b)    | ~gnus-uu-mark-buffer~                         |
+| =u=          | =M-#=        | ~gnus-summary-unmark-as-processable~          |
+| =U=          | (M H U)    | ~gnus-summary-unmark-all-processable~         |
+| =%=          | (M P r)    | ~gnus-uu-mark-by-regexp~                      |
+| =C=, =cc=      | =m=          | ~gnus-summary-mail-other-window~              |
+| =f=, =cf=      | =f=          | ~gnus-summary-followup~                       |
+| =F=, =cF=      | =F=          | ~gnus-summary-followup-with-original~         |
+| =r=, =cr=      | =r=          | ~gnus-summary-reply~                          |
+| =R=, =cR=      | =R=          | ~gnus-summary-reply-with-original~            |
+| =cw=         | (S W)      | ~gnus-summary-very-wide-reply~                |
+| =cW=         | (S W)      | ~gnus-summary-very-wide-reply-with-original~  |
+| =C-c C-f=    | =C-c C-f=    | ~gnus-summary-mail-forward~                   |
+| =.=          | (G f)      | ~gnus-summary-first-unread-article~           |
+| =,=          | (G b)      | ~gnus-summary-best-unread-article~            |
+| =!=          | =d=          | ~gnus-summary-mark-as-read-forward~           |
+| ===          | =u=, =!=       | ~gnus-summary-tick-article-forward~           |
+| =J=          | =j=          | ~gnus-summary-goto-article~                   |
+| =gr=         | =M-g=        | ~gnus-summary-rescan-group~                   |
+| =z/=         | =/=          | ~gnus-summary-limit-map~                      |
+| =zt=         | =t=          | ~gnus-summary-toggle-header~                  |
+| =x=          | =x=          | ~gnus-summary-limit-to-unread~                |
+| =gX=         | =w=          | ~gnus-summary-browse-url~                     |
+| =^=          | =^=          | ~gnus-summary-refer-parent-article~           |
+| =M-^=        | =M-^=        | ~gnus-summary-refer-article~                  |
+| =Tk=         | (T K)      | ~gnus-summary-kill-thread~                    |
+| =Tl=         | =M-l=        | ~gnus-summary-lower-thread~                   |
+| =Ti=         | (T I)      | ~gnus-summary-raise-thread~                   |
+| =Tm=         | (T #)      | ~gnus-uu-mark-thread~                         |
+| =Tu=         | (T M-#)    | ~gnus-uu-unmark-thread~                       |
+| =TT=         | =M-t=        | ~gnus-summary-toggle-threads~                 |
+| =Ts=, =zo=     | =M-s=        | ~gnus-summary-show-thread~                    |
+| =Th=, =zc=     | =M-h=        | ~gnus-summary-hide-thread~                    |
+| =TS=         | (T S)      | ~gnus-summary-show-all-threads~               |
+| =TH=         | (T H)      | ~gnus-summary-hide-all-threads~               |
+| =Tt=         | (T t)      | ~gnus-summary-rethread-current~               |
+| =T^=         | (T ^)      | ~gnus-summary-reparent-thread~                |
+| =T M-^=      | (T M-^)    | ~gnus-summary-reparent-children~              |
+| =Tn=         | =M-f=        | ~gnus-summary-next-thread~                    |
+| =Tp=         | =M-b=        | ~gnus-summary-prev-thread~                    |
+| =Td=         | (T d)      | ~gnus-summary-down-thread~                    |
+| =Ta=         | (T u)      | ~gnus-summary-up-thread~                      |
+| =To=         | (T o)      | ~gnus-summary-top-thread~                     |
+| =M-s=        | =M-s=        | ~gnus-summary-search-article-forward~         |
+| =M-r=        | =M-r=        | ~gnus-summary-search-article-backward~        |
+| =M-S=        | =M-S=        | ~gnus-summary-repeat-search-article-forward~  |
+| =M-R=        | =M-R=        | ~gnus-summary-repeat-search-article-backward~ |
+| =&=          | =&=          | ~gnus-summary-execute-command~                |
+| =M-&=        | =M-&=        | ~gnus-summary-universal-argument~             |
+| =*=          | =*=          | ~gnus-cache-enter-article~                    |
+| =M-*=        | =M-*=        | ~gnus-cache-remove-article~                   |
+| =I=          | =I=          | ~gnus-summary-increase-score~                 |
+| =L=          | =L=          | ~gnus-summary-lower-score~                    |
+
+Grouped relocations:
+
+- Sort (=o= prefix): =oa= author, =oc= chars, =od= date, =oi= score, =ol= lines,
+  =omd= most-recent-date, =omm= marks, =omn= most-recent-number, =on= number,
+  =oo= original, =or= random, =os= subject, =ot= recipient.
+
+- Save (=O= prefix, was upstream =O=): =Oo= article, =Om= mail, =Or= rmail,
+  =Of= file, =OF= write-article-file, =Ob= body-file, =Oh= folder, =Ov= vm,
+  =Op= pipe-output, =OP= muttprint. =gnus-summary-pipe-output= is also on
+  the literal pipe key.
+
+- Decode (=X= prefix): =Xu/XU/Xvu/XvU= uu, =Xs/XS/Xvs/XvS= unshar,
+  =Xp/XP/Xvp/XvP= postscript, =Xo= save, =Xb= binhex, =XY= yenc.
+
+The =B= (backend) prefix is removed entirely — see [[*Unbound and removed commands]].
+
+*** gnus-article-mode-map
+
+| Hel          | Gnus       | Command                               |
+|--------------+------------+---------------------------------------|
+| =q=, =Q=, =ZZ=, =ZQ= | n/a        | =evil-window-delete=                    |
+| =TAB=          | =TAB=        | =forward-button=                        |
+| =<backtab>=    | =<backtab>=  | =backward-button=                       |
+| =SPC=          | =SPC=        | =gnus-article-goto-next-page=           |
+| =DEL=, =S-SPC=   | =DEL=, =S-SPC= | =gnus-article-goto-prev-page=           |
+| =r=, =cr=        | =r=          | =gnus-summary-reply=                    |
+| =R=            | =R=          | =gnus-article-reply-with-original=      |
+| =C=, =cc=        | =C-c m=      | =gnus-article-mail=                     |
+| =cR=           | n/a        | =gnus-summary-reply-with-original=      |
+| =cf=           | n/a        | =gnus-summary-followup=                 |
+| =cF=           | n/a        | =gnus-summary-followup-with-original=   |
+| =cw=           | n/a        | =gnus-summary-very-wide-reply=          |
+| =cW=           | n/a        | =gnus-article-wide-reply-with-original= |
+| =C-c C-f=      | =C-c C-f=    | =gnus-summary-mail-forward=             |
+| =C-]=          | =C-c ^=      | =gnus-article-refer-article=            |
+| =s=            | =h=, =s=       | =gnus-article-show-summary=             |
+| =gr=           | =g=          | =gnus-summary-show-article=             |
+| =gX=           | n/a        | =gnus-summary-browse-url=               |
+| =F=            | =F=          | =gnus-article-followup-with-original=   |
+| =R=            | =R=          | =gnus-article-reply-with-original=      |
+| =W=            | =W=          | =gnus-article-wide-reply-with-original= |
+
+Washing commands move under the =zw= prefix:
+
+| Hel  | Gnus  | Command                                 |
+|------+-------+-----------------------------------------|
+| =zwl=  | =W l=   | =gnus-summary-stop-page-breaking=         |
+| =zwr=  | =W r=   | =gnus-summary-caesar-message=             |
+| =zwm=  | =W m=   | =gnus-summary-morse-message=              |
+| =zwi=  | =W i=   | =gnus-summary-idna-message=               |
+| =zwt=  | =t=     | =gnus-summary-toggle-header=              |
+| =zwv=  | =W v=   | =gnus-summary-verbose-headers=            |
+| =zwo=  | =W o=   | =gnus-article-treat-overstrike=           |
+| =zwd=  | =W d=   | =gnus-article-treat-smartquotes=          |
+| =zwu=  | =W U=   | =gnus-article-treat-non-ascii=            |
+| =zwyf= | =W Y f= | =gnus-article-outlook-deuglify-article=   |
+| =zwyu= | =W Y u= | =gnus-article-outlook-unwrap-lines=       |
+| =zwya= | =W Y a= | =gnus-article-outlook-repair-attribution= |
+| =zwyc= | =W Y c= | =gnus-article-outlook-rearrange-citation= |
+| =zww=  | =W w=   | =gnus-article-fill-cited-article=         |
+| =zwq=  | =W Q=   | =gnus-article-fill-long-lines=            |
+| =zwc=  | =W C=   | =gnus-article-capitalize-sentences=       |
+| =zw6=  | =W 6=   | =gnus-article-de-base64-unreadable=       |
+| =zwz=  | =W Z=   | =gnus-article-decode-HZ=                  |
+| =zwa=  | =W A=   | =gnus-article-treat-ansi-sequences=       |
+| =zwb=  | =W b=   | =gnus-article-add-buttons=                |
+| =zwB=  | =W B=   | =gnus-article-add-buttons-to-head=        |
+| =zwp=  | =W p=   | =gnus-article-verify-x-pgp-sig=           |
+| =zws=  | =W s=   | =gnus-summary-force-verify-and-decrypt=   |
+
+*** gnus-server-mode-map
+
+| Hel          | Gnus | Command                                  |
+|--------------+------+------------------------------------------|
+| =q=, =Q=, =ZZ=, =ZQ= | =q=    | =gnus-server-exit=                         |
+| =RET=          | =RET=  | =gnus-server-read-server=                  |
+| =SPC=          | =SPC=  | =gnus-server-read-server-in-server-buffer= |
+| =C=            | =C=    | =gnus-server-close-server=                 |
+| =D=            | =D=    | =gnus-server-deny-server=                  |
+| =G=            | =G=    | =gnus-group-make-nnir-group=               |
+| =I=            | =I=    | =gnus-server-set-cloud-method-server=      |
+| =L=            | =L=    | =gnus-server-offline-server=               |
+| =O=            | =O=    | =gnus-server-open-server=                  |
+| =R=            | =R=    | =gnus-server-remove-denials=               |
+| =S=            | =S=    | =gnus-server-show-server=                  |
+| =a=            | =a=    | =gnus-server-add-server=                   |
+| =y=            | =c=    | =gnus-server-copy-server=                  |
+| =e=            | =e=    | =gnus-server-edit-server=                  |
+| =gr=           | =g=    | =gnus-server-regenerate-server=            |
+| =i=            | =i=    | =gnus-server-toggle-cloud-server=          |
+| =d=            | =k=    | =gnus-server-kill-server=                  |
+| =L=            | =l=    | =gnus-server-list-servers=                 |
+| =s=            | =s=    | =gnus-server-scan-server=                  |
+| =p=            | =y=    | =gnus-server-yank-server=                  |
+| =c=            | =z=    | =gnus-server-compact-server=               |
+| =M-c=          | =M-c=  | =gnus-server-close-all-servers=            |
+| =M-o=          | =M-o=  | =gnus-server-open-all-servers=             |
+
+*** gnus-browse-mode-map
+
+| Hel          | Gnus | Command                               |
+|--------------+------+---------------------------------------|
+| =q=, =Q=, =ZZ=, =ZQ= | =q=, =l= | =gnus-browse-exit=                      |
+| =u=            | =u=    | =gnus-browse-unsubscribe-current-group= |
+| =SPC=          | =SPC=  | =gnus-browse-read-group=                |
+| =RET=          | =RET=  | =gnus-browse-select-group=              |
+
+*** gnus-bookmark-bmenu-mode-map
+
+| Hel          | Gnus | Command                                  |
+|--------------+------+------------------------------------------|
+| =q=, =Q=, =ZZ=, =ZQ= | =q=    | =quit-window=                              |
+| =m=            | =m=    | =gnus-bookmark-bmenu-mark=                 |
+| =u=            | =u=    | =gnus-bookmark-bmenu-unmark=               |
+| =DEL=          | =DEL=  | =gnus-bookmark-bmenu-backup-unmark=        |
+| =d=            | =d=, =k= | =gnus-bookmark-bmenu-delete=               |
+| =x=            | =x=    | =gnus-bookmark-bmenu-execute-deletions=    |
+| =RET=          | =RET=  | =gnus-bookmark-bmenu-select=               |
+| =L=            | =l=    | =gnus-bookmark-bmenu-load=                 |
+| =s=            | =s=    | =gnus-bookmark-bmenu-save=                 |
+| =t=            | =t=    | =gnus-bookmark-bmenu-toggle-infos=         |
+| =a=            | =a=    | =gnus-bookmark-bmenu-show-details=         |
+| =A=            | n/a  | =gnus-bookmark-bmenu-show-all-annotations= |
+| =E=            | n/a  | =gnus-bookmark-bmenu-edit-annotation=      |
+| =R=            | n/a  | =gnus-bookmark-bmenu-rename=               |
+
+** Unbound and removed commands
+
+A number of upstream Gnus / evil-collection commands are intentionally left
+without a key in this module. Reach any of them with =M-x=, or bind your own.
+
+*** The =g= prefix and motion belong to Hel
+
+Hel owns modal motion and the =g= prefix, so evil-collection's =g=-prefixed
+group commands are not bound here. The ones you are most likely to miss:
+
+- =gc= / =gC= :: ~gnus-group-catchup-current~ / ~gnus-group-catchup-current-all~
+  — note =c= / =C= are rebound to ~gnus-group-mail~ instead.
+- =gu= / =gU= :: ~gnus-group-unsubscribe-current-group~ / ~gnus-group-unsubscribe-group~.
+- =gl= :: ~gnus-group-set-current-level~ — still reachable on the upstream =S l=.
+
+*** Removed as irrelevant to a lieer + notmuch mailbox
+
+There is no NNTP server (~gnus-select-method~ is ~nnnil~), ~gnus-agent~ is off,
+and mail is exposed as ~nnselect~ notmuch-search groups kept in sync by lieer.
+That makes a class of Usenet / agent commands dead weight, and the expiry /
+deletion commands actively wrong (they delete maildir files that lieer just
+re-downloads), so they are unbound from the group and summary maps (including
+the entire =L= list and =B= backend prefixes):
+
+| Command                        | Was | Why removed                                        |
+|--------------------------------+-----+----------------------------------------------------|
+| ~gnus-group-list-active~         | =La=  | Lists an NNTP server's groups; there is no server. |
+| ~gnus-group-list-cached~         | =Lc=  | Article-cache/agent feature; ~gnus-agent~ is off.    |
+| ~gnus-group-list-killed~         | =Lk=  | "Killed" is a Usenet subscription state.           |
+| ~gnus-group-list-zombies~        | =Lz=  | Zombies only arise from new NNTP groups.           |
+| ~gnus-group-list-limit~ (submap) | =L/=  | Group-list set arithmetic (also broken, see below).|
+| ~gnus-group-list-flush~ (submap) | =Lf=  | Same set arithmetic.                               |
+| ~gnus-group-list-plus~ (submap)  | =Lp=  | Same set arithmetic.                               |
+| ~gnus-group-list-ticked~         | =L!=  | Redundant with the "Flagged" notmuch search group. |
+| ~gnus-group-list-dormant~        | =L?=  | The "dormant" mark is unused in this flow.         |
+| ~gnus-group-list-matching~       | =Lm=  | Regexp group filter; pointless with a handful of groups. |
+| ~gnus-group-list-all-matching~   | =LM=  | Same.                                              |
+| ~gnus-summary-news-other-window~ | =ci=  | Posts a /news/ article; there is no NNTP server.   |
+| ~gnus-group-news~                | =i=   | Composes a /news/ article, injecting it into the local maildir without SMTP — an orphan Gmail never sees. |
+| ~gnus-group-post-news~           | =a=   | Same news-composing family; no NNTP server. Compose mail via =c=/=C=. |
+| ~gnus-summary-post-news~         | =a=, =Sp= | Composes a /news/ article; there is no NNTP server. |
+| ~gnus-uu-post-news~              | =Su=  | Uuencode-posts a file to news; no server.          |
+| ~gnus-summary-post-forward~      | =Sop=, =SOp= | Forwards to a newsgroup; no server.           |
+| ~gnus-summary-mail-crosspost-complaint~ | =S M-c= | Usenet crosspost complaint; no server.      |
+| ~gnus-summary-cancel-article~    | =Sc=  | Cancels a Usenet post you made; no server.         |
+| ~gnus-summary-supersede-article~ | =Ss=  | Supersedes a Usenet post; no server.               |
+| ~gnus-summary-crosspost-article~ | =BB=  | Crossposting is an NNTP-only concept.              |
+| ~gnus-summary-delete-article~    | =Bd=, =B DEL= | Deletes the maildir file, which lieer re-downloads on the next sync; use =+trash= (~helheim-gnus-trash~) instead. |
+| ~gnus-summary-move-article~      | =Bm=  | Moves the maildir file to another group; lieer re-downloads the original. |
+| ~gnus-summary-copy-article~      | =Bc=  | Copies the message into another group's maildir.   |
+| ~gnus-summary-import-article~    | =Bi=  | Writes an arbitrary file into the maildir.         |
+| ~gnus-summary-respool-article~   | =Br=  | Re-delivers → rewrites maildir files.              |
+| ~gnus-summary-edit-article~      | =e=, =Bw= | Edits the raw message in place → rewrites the file. |
+| ~gnus-article-delete-part~       | =Kd=  | Strips a MIME part → rewrites the article file.    |
+| ~gnus-summary-mark-as-expirable~ | =E=   | Marks for expiry; expiry deletes the maildir file (lieer re-downloads). Use =+trash= instead. |
+| ~gnus-summary-expire-articles~   | =Be=  | Runs expiry → deletes maildir files.               |
+| ~gnus-summary-expire-articles-now~ | =BE=, =B C-M-e= | Immediate expiry → deletes maildir files.      |
+| ~gnus-summary-expire-thread~     | =TE=  | Expires a thread → deletes maildir files.          |
+| ~gnus-group-expire-articles~     | =ge=, =C-c C-x= | Expire current group → deletes maildir files. |
+| ~gnus-group-expire-all-groups~   | =gE=, =C-c C-M-x= | Expire every group → deletes maildir files. |
+| ~gnus-group-delete-group~        | =G DEL= | Deletes the group /and/ its articles from the backend — "removed forever, no undo". |
+| ~gnus-group-expunge-group~       | =X=, =Gx= | Expunges expired articles → deletes maildir files. |
+
+The =L= prefix now keeps only =Ll= (level), =Ls= (groups) and =Lu= (all-groups).
+The =B= (backend) prefix is gone entirely; the =S= (send) prefix keeps only its
+mail reply / forward / mail commands, dropping the news post / cancel / supersede
+members.
+
+#+begin_quote
+[!NOTE]
+The =L/= and =Lf= submenus were also broken independently of relevance.
+~gnus-group-list-plus~ (which backs both) hardcodes =(push ?A ...)= to replay
+your keystroke against the list map — but this module moves that prefix from
+=A= to =L= and rebinds =A= to ~gnus-activate-all-groups~, so the replay resolved
+to the wrong command.
+#+end_quote
+
+*** Action commands with no key yet
+
+The notmuch-tag actions ~helheim-gnus-archive~, ~helheim-gnus-trash~,
+~helheim-gnus-spam~ and ~helheim-gnus-toggle-flagged~ are not bound to a key by
+this module (see also the [[*Summary-buffer commands][Usage]] section).
