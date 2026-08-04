@@ -27,6 +27,15 @@
 
 ** Customization
 
+- Headline padding is controlled by ~helheim-org-heading-padding~. Set it to
+  ~nil~ to disable:
+
+  #+begin_src emacs-lisp
+  (setopt helheim-org-heading-padding nil)
+  #+end_src
+
+  It must be set with ~setopt~ — the value is applied by a ~:set~ function.
+
 - ~prettify-symbols-mode~ is enabled in Org-mode buffers. To disable remove
   the coresponding hook:
 
