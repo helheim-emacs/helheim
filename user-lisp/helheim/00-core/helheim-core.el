@@ -99,6 +99,8 @@ Must be set before `helheim-core' is loaded!"
     ;; Close transient menus with ESC.
     (keymap-set transient-map "<escape>" #'transient-quit-one)))
 
+(setup svg-lib (:install t))
+
 (setup nerd-icons
   (:install t)
   (:after-load

@@ -94,29 +94,27 @@ Must be set with `setopt' function!"
   ;; You may delete the hooks you don't like with:
   ;;   (remove-hook 'org-mode-hook 'helheim-org-prettify-todo-keywords)
   (:hook org-mode-hook (prettify-symbols-mode
-                        helheim-org-prettify-todo-keywords
-                        helheim-org-prettify-blocks
-                        helheim-org-local-variables-h))
+                        ;; helheim-org-prettify-todo-keywords
+                        helheim-org-prettify-blocks))
   (:setopt org-todo-keywords
            '((sequence "MAYBE" "TODO" "NEXT" "WAIT" "|" "DONE" "CANCELLED")
              (sequence "READ" "NEXT" "|" "DONE"))))
 
-(defun helheim-org-local-variables-h ()
-  (setq prettify-symbols-compose-predicate #'helheim-org-prettify-compose-p))
-
-(defun helheim-org-prettify-todo-keywords ()
-  "Beautify org mode \"todo\" keywords using `prettify-symbols-mode'."
-  (cl-callf append prettify-symbols-alist
-    '(("MAYBE"     . ?󰒅) ; 󰔌
-      ("TODO"      . ?󰄱) ; 󰝣
-      ("NEXT"      . ?󰡖) ; 󱗝
-      ("WAIT"      . ?)
-      ("DONE"      . ?󰄵) ; 󰱒 
-      ("CANCELLED" . ?󰅘)
-      ("READ"      . ?󰃃))))
+;; (defun helheim-org-prettify-todo-keywords ()
+;;   "Beautify org mode \"todo\" keywords using `prettify-symbols-mode'."
+;;   (setq-local prettify-symbols-compose-predicate #'helheim-org-prettify-compose-p)
+;;   (cl-callf append prettify-symbols-alist
+;;     '(("MAYBE"     . ?󰒅) ; 󰔌
+;;       ("TODO"      . ?󰄱) ; 󰝣
+;;       ("NEXT"      . ?󰡖) ; 󱗝
+;;       ("WAIT"      . ?)
+;;       ("DONE"      . ?󰄵) ; 󰱒 
+;;       ("CANCELLED" . ?󰅘)
+;;       ("READ"      . ?󰃃))))
 
 (defun helheim-org-prettify-blocks ()
   "Beautify org mode block keywords using `prettify-symbols-mode'."
+  (setq-local prettify-symbols-compose-predicate #'helheim-org-prettify-compose-p)
   (cl-callf append prettify-symbols-alist
     (eval-when-compile
       (mapcan (lambda (x) (list x (cons (upcase (car x)) (cdr x))))
