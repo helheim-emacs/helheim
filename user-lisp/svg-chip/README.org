@@ -1,0 +1,423 @@
+* svg-chip
+
+Draw parts of a buffer as rounded SVG chips — a keyword, a tag, a date, or
+anything else a regexp can match.
+
+The package knows nothing about any particular major mode. You give it rules;
+it turns them into font-lock keywords and puts an image over each match:
+
+#+begin_example
+svg-chip-rules what to match and how to draw it
+    ▼
+font-lock keywords installed once per buffer
+    ▼
+a display property carrying an SVG image
+#+end_example
+
+A mode that wants chips sets the rules buffer-locally and turns the mode on:
+
+#+begin_src emacs-lisp
+(defun my-prog-chips ()
+  (setq-local svg-chip-rules
+              '(("\\<\\(TODO\\)\\>"  :face warning :inverse t)
+                ("\\<\\(FIXME\\)\\>" :face error   :inverse t)
+                ("\\([0-9]+%\\)"     :face success)))
+  (svg-chip-mode 1))
+
+(add-hook 'prog-mode-hook #'my-prog-chips)
+#+end_src
+
+Because the chips are ordinary font-lock keywords, everything font-lock
+already does for you still applies: they follow edits, they are only drawn
+for the part of the buffer on screen, and turning the mode off removes them.
+
+** Requirements
+
+GNU Emacs 29.1 or newer, built with SVG support.
+Check ~(image-type-available-p 'svg)~.
+
+** Drawing one chip
+
+~(svg-chip LABEL &rest SPEC)~ returns an image. SPEC are the style options
+that ~svg-lib-text-tag~ accepts (see ~svg-lib-style-default~ for the full
+list), plus three options of our own:
+
+| =:face=    | face, property list or colour string to colour the chip after |
+| =:inverse= | fill the chip with the foreground colour instead of outlining |
+| =:icon=    | name of an icon to draw                                       |
+
+You can call it on its own, wherever an image is wanted — in a mode line, in
+an overlay, in a completion annotation — without turning the mode on at all.
+
+*** Icons
+
+=:icon NAME= draws an icon before LABEL. Leave LABEL empty to show only the
+icon. ~:collection~ picks one of ~svg-lib-icon-collections~ — =material= is the
+default; =bootstrap=, =octicons=, =simple=, =boxicons= and =vscode= are also
+available. Icon names come from the collection itself, so look them up on
+that collection's own site.
+
+#+begin_src emacs-lisp
+(svg-chip "" :face 'shadow :icon "paperclip")
+#+end_src
+
+#+begin_quote
+[!NOTE]
+An icon is fetched over the network the first time it is drawn — from inside
+font-lock, so Emacs freezes for that one request — then cached under
+~svg-lib-icons-dir~ (=.cache/svg-lib/= inside your ~user-emacs-directory~) and
+never fetched again. A name the collection does not have falls back to a plain
+text chip instead of breaking fontification, and its half-downloaded file is
+deleted. That fallback is cached like any other chip, so the download is
+attempted once and not on every redraw; ~M-x svg-chip-clear-cache~ retries one
+that failed because the machine was offline.
+#+end_quote
+
+** The rules
+
+~svg-chip-rules~ is a buffer-local list of =(MATCHER . SPEC)= pairs.
+
+MATCHER is the same as in ~font-lock-keywords~: either the regexp to search
+for, or a function that does the search itself (called with one argument,
+the LIMIT of the search; it should return non-nil, move point, and set
+match-data appropriately if it succeeds; like ~re-search-forward~ would).
+
+Group 1 of the match is the text the chip *covers*. The chip is drawn over
+exactly that text, and nothing outside it is touched.
+
+SPEC says what to draw over it, and there are two forms.
+
+A *plist* of ~svg-chip~ arguments labels the chip with group 2 if the regexp
+has one, and with group 1 otherwise. This is how a rule draws less text than
+it covers — with =<2026-08-08>= as group 1 and =2026-08-08= as group 2, the
+angle brackets vanish behind the chip without appearing on it:
+
+#+begin_src emacs-lisp
+'(("\\(<\\([0-9-]+\\)>\\)" :face org-date))
+#+end_src
+
+A *renderer* is a function returning the image to draw, followed by its own
+options. It is called with the whole of group 1, exactly as it stands in the
+buffer, and works out what to draw for itself:
+
+#+begin_src emacs-lisp
+(defun my-priority (cookie)          ; cookie is "[#A]", not "A"
+  (svg-chip (string-trim cookie "\\[#" "\\]") :face 'org-priority))
+#+end_src
+
+The match data is still in place while a renderer runs, so it may also read
+further groups, or the text around the match, with ~match-string~ and friends —
+which is how one regexp hands over several pieces at once.
+
+Earlier rules win over later ones.
+
+#+begin_quote
+[!NOTE]
+Group 2 means something to a plist SPEC and nothing to a renderer: a plist has
+nowhere of its own to choose a label, so the regexp chooses for it. This is what
+lets a renderer be called by hand with the text it really sees —
+~(my-priority "[#A]")~ — whatever groups the rule around it uses.
+#+end_quote
+
+*** Refusing a match
+
+A regexp cannot see the surrounding context. Before anything is drawn,
+~svg-chip-predicate~ is asked about every match — it is given the match's
+start, end, and text. If it returns ~nil~, that match is left as plain text.
+
+The default, ~svg-chip-not-in-string-p~, refuses only string literals, so the
+=TODO=, =XXX= and =BUG= markers in a comment are drawn like any other match.
+It answers from the face the buffer already carries — one ~get-text-property~,
+about 0.5µs against 20µs for a ~syntax-ppss~ that is already warm — and falls
+back to the syntax table where a buffer fontifies nothing syntactically.
+Tree-sitter modes need no separate branch, since they replace the same
+syntactic pass. What is left uncovered is a mode that paints strings in a face
+of its own, which should set its own predicate.
+
+A single rule can also name its own predicate with ~:predicate~. This
+*replaces* the buffer-wide predicate for that rule; it does not add to it:
+
+#+begin_src emacs-lisp
+'(("\\_<\\(TODO\\)\\_>" my-stub :predicate my-not-in-a-docstring-p)
+  ("\\(\\[#[A-Z]\\]\\)" :face shadow :predicate my-at-headline-p))
+#+end_src
+
+A refusal simply returns no properties, so there is nothing to undo — unlike
+~prettify-symbols-mode~, which composes the region first and has to un-compose
+it when its predicate refuses.
+
+#+begin_quote
+[!CAUTION]
+A predicate is called with point and the match data already saved, so it is free
+to move either. That saving matters: font-lock searches for the next match
+*starting from point*, and its only protection against standing still is to
+catch empty matches, so a predicate that left point back on its own match would
+put font-lock on that match again — forever. ~syntax-ppss~ moves point when
+given a position, which makes the most obvious predicate to write also the one
+that would hang Emacs.
+#+end_quote
+
+*** When one rule is not enough
+
+One rule yields exactly one image per match.
+~svg-chip-extra-font-lock-keywords~ holds ordinary ~font-lock-keywords~
+entries for the cases that cannot express. They are installed alongside the
+rules and may apply ~display~ and ~cursor-sensor-functions~ themselves — the
+mode has already made both properties font-lock-managed, so they are removed
+again when it is turned off.
+
+A run of Org tags is the case that makes this necessary: =:a:b:c:= needs a
+separate image for each tag, and two neighbouring tags share the colon between
+them, so no single regexp can hand them over one at a time.
+
+Such a keyword should not build its own property list. ~svg-chip-render~ is
+what a rule uses internally, and it is public for exactly this reason:
+
+#+begin_src elisp
+(when-let* ((props (svg-chip-render #'my-renderer)))
+  (add-text-properties (match-beginning 1) (match-end 1) props))
+#+end_src
+
+It reads the same match data a rule would — group 1 is the text the chip
+covers — asks ~svg-chip-predicate~ (or the predicate passed as its second
+argument), and returns the properties, or nil if the predicate refused.
+
+Point and the match data are restored before it returns, so the match is still
+there to hand to ~add-text-properties~; the predicate is wrapped on its own as
+well, so the renderer after it sees that same match. Both are entitled to
+search — ~syntax-ppss~ does, and so does any ~string-trim~.
+
+The same function works outside font-lock, over a buffer walked by hand: all
+it needs is the match data. This is how a finished Org agenda buffer gets its
+chips.
+
+** The cache
+
+font-lock draws every visible chip again on each re-fontification, so a chip is
+drawn far more often than it is written: about 275µs to draw one, against 12µs
+to find it in the cache. Emacs caches the *rasterization* of an image, keyed on
+the whole image spec, but not the building of the SVG, and svg-lib caches only
+the icon files it downloads. So ~svg-chip~ keeps every image it draws: on a
+1000-line buffer holding 2500 chips, that takes a full fontification from 832ms
+to 59ms.
+
+The key holds everything the image depends on: the label, the style, the
+*resolved* attributes of every face involved, and the width and height of the
+buffer's default font. Nothing is ever invalidated — a new theme or a
+=text-scale-adjust= simply produces a different key, and images are dropped
+only when the cache fills up. ~svg-chip-cache-size~ sets that limit, counted in
+chips; reaching it empties the cache, which costs a redraw of whatever is on
+screen. ~M-x svg-chip-clear-cache~ empties it by hand, for a change no key can
+see.
+
+A renderer that draws through ~svg-chip~ needs to do nothing. One that calls
+svg-lib directly should ask for the cache itself, by wrapping its drawing in
+~svg-chip-with-cache~:
+
+#+begin_src emacs-lisp
+(defun my-progress (cookie)
+  (svg-chip-with-cache (list 'my-progress cookie
+                             (face-attribute 'success :foreground nil 'default))
+    (svg-image (svg-lib-progress-bar (my-value cookie) 'success)
+               :ascent 'center)))
+#+end_src
+
+The font metrics are added to the key for you. What you must supply is the
+label and every face attribute the renderer reads.
+
+#+begin_quote
+[!CAUTION]
+Put *resolved* attributes in the key — ~(face-attribute 'success :foreground
+nil 'default)~ — never the face symbol. A face symbol does not change when the
+theme does, so a key built from one would go on returning the previous theme's
+colours until the cache happened to fill up.
+#+end_quote
+
+Measured on a 1000-line file holding 2500 chips: a full fontification takes
+832ms with no cache, 113ms the first time through, and 59ms on every pass
+after that.
+** The cursor
+
+#+begin_src emacs-lisp
+(setopt svg-chip-action-at-point 'edit)  ; the default
+#+end_src
+
+='edit= reveals the chip's underlying text in place, so it can be read and
+edited. ='echo= prints the text in the echo area instead. ~nil~ does nothing.
+
+A revealed chip stays revealed until the cursor leaves it. Font-lock cannot
+take the text away in the meantime — not when a neighbouring chip on the same
+line is redrawn, and not when typing in the revealed text refontifies the
+line. ~svg-chip-render~ checks ~svg-chip--revealed-region~ before drawing, so
+every pass over the line agrees about which chip is currently open.
+
+** Why not svg-tag-mode
+
+[[https://github.com/rougier/svg-tag-mode][svg-tag-mode]] covers the same
+ground, and only four things in it are of any use here: ~svg-tag-make~, the
+~svg-tag-tags~ → font-lock plumbing, ~svg-tag-action-at-point~, and
+~svg-tag--cursor-function~. Writing those four directly costs about 65 lines
+and steers clear of the following, all of them properties of that package:
+
+- ~svg-tag-mode-on~ calls ~(add-to-list 'font-lock-extra-managed-props
+  'display)~ with no ~local~ argument, so it changes the *global* value. Every
+  buffer in the session ends up managing a property it never sets, and
+  ~svg-tag-mode-off~ does not undo it.
+
+- It adds an anonymous lambda to ~read-only-mode-hook~ globally, and nothing
+  can remove it.
+
+- It advises ~org-fontify-meta-lines-and-blocks~, and that advice in turn
+  temporarily advises ~remove-text-properties~ *globally*. Appending the
+  keywords already gives the right ordering, so none of that is needed here.
+
+- ~svg-tag--cursor-function~ finds the chip by searching outward from point for
+  a change in ~display~, which only holds while point is strictly inside the
+  chip. It is not always inside: ~cursor-sensor-functions~ is rear-sticky, so
+  just past a chip cursor-sensor still calls with =entered=, and from there the
+  backward search stops at the end of that chip while the forward search runs on
+  to the *next* one — unfontifying everything in between. In Org that is worse
+  still, since ~org-unfontify-region~ also ~decompose-region~s the whole span,
+  taking the bullets ~org-superstar~ composes onto the stars and the
+  ~invisible~, ~keymap~ and ~mouse-face~ properties with it.
+
+- ~svg-lib-tag~ reads a label shaped like =[star]= as an icon name and tries to
+  look it up. ~svg-chip~ calls ~svg-lib-text-tag~ directly, so it can never be
+  surprised this way.
+* org-svg-chips
+** Enable
+#+begin_src emacs-lisp
+(require 'org-svg-chips)
+(add-hook 'org-mode-hook #'org-svg-chips-mode)
+(add-hook 'org-agenda-finalize-hook #'org-svg-chips-agenda)
+#+end_src
+
+** What it draws
+
+TODO keywords, tags, priority and statistics cookies, and timestamps become
+rounded chips — in Org buffers and in the agenda.
+
+#+begin_example
+  * TODO [#1] Write the thing        :attach:cpp:
+    ╭────╮ ╭─╮                        ╭──────╮ ╭───╮
+    │TODO│ │1│                        │attach│ │cpp│
+    ╰────╯ ╰─╯                        ╰──────╯ ╰───╯
+
+    SCHEDULED: <2026-08-04 Tue 14:00>     [12/26]
+               ╭────────────────┬───────╮ ╭───┬──╮
+               │2026-08-04 Tue  │ 14:00 │ │▓▓░│12/26
+               ╰────────────────┴───────╯ ╰───┴──╯
+                 outlined        filled
+#+end_example
+
+Colours come from the theme's own faces — ~org-tag~, ~org-date~,
+~org-priority~, ~org-done~, ~shadow~, and whatever ~org-get-todo-face~ returns
+for each keyword, which follows ~org-todo-keyword-faces~. Nothing is
+hardcoded, so every theme is honoured. Chips are *outlined* by default;
+~:inverse t~ fills one instead.
+
+Which TODO keywords exist is not configured here either: they are read from
+the buffer, so a file-local =#+TODO:= line is honoured on its own.
+
+** Customization
+*** Restyling one keyword or one tag
+
+~org-svg-chips-todo-styles~ and ~org-svg-chips-tag-styles~ are alists of
+=(NAME . STYLE)=. STYLE is a plist of ~svg-chip~ arguments, and it wins over
+whatever style that chip would otherwise get. Anything not named keeps
+the default.
+
+#+begin_src emacs-lisp
+(setopt org-svg-chips-todo-styles
+        '(("NEXT" :inverse t)     ; filled, so it stands out
+          ("BUG"  :icon "bug")))
+
+(setopt org-svg-chips-tag-styles
+        '(("attach" :icon "paperclip")
+          ("urgent" :inverse t)))
+#+end_src
+
+*** The rules
+
+~org-svg-chips-rules~ is the full list of what Org draws, in the format that
+[[../svg-chip/][svg-chip]] documents: =(MATCHER . SPEC)=. The TODO rule uses the search-function
+form of MATCHER, so it can read Org's own ~org-todo-regexp~ and match nothing
+in a buffer that has no keywords.
+
+#+begin_src emacs-lisp
+;; Draw every =verbatim= span as a chip, ahead of the defaults.
+(push '("=\\([^=\n]+\\)=" :face org-verbatim :inverse t)
+      org-svg-chips-rules)
+#+end_src
+
+Earlier rules win over later ones. The list is handed to ~svg-chip-mode~ once
+per buffer, when ~org-svg-chips-mode~ starts, which overwrites ~svg-chip-rules~ —
+so it is *this* variable that a ~setq-local~ from ~org-mode-hook~ has to set to
+give one buffer its own rules.
+
+~push~ reads the existing value, so it has to run after the package is loaded:
+wrap it in ~(with-eval-after-load 'org-svg-chips …)~. The two style alists need
+no such wrapping — a plain ~setopt~ in ~init.el~ survives, because ~defcustom~
+leaves an already-set value alone.
+
+Tags are not matched here — see *Notes* below.
+
+*** The renderers
+
+Every function named ~org-svg-chips-render-*~ follows one contract, so
+a rule, the walk over the agenda and a call by hand all reach the same code:
+
+| takes   | the text of group 1, exactly as written in the buffer |
+| returns | an image, ready for a ~display~ text property           |
+| reads   | the rest of the match data, which is still in place   |
+
+The text keeps its punctuation — =[#A]=, =:work:=, =<2026-08-04 Tue>= — and
+each renderer strips whatever it does not draw. So most of them can be tried
+at ~M-:~ knowing nothing about the rule that normally calls them:
+
+#+begin_src emacs-lisp
+(org-svg-chips-render-priority "[#A]")
+#+end_src
+
+#+begin_quote
+[!CAUTION]
+Handing that renderer a bare string draws the wrong text instead of failing.
+~string-match~ leaves the match data holding offsets into the string, while
+~match-string~ called without its STRING argument reads the current *buffer*
+at those offsets — so the chip gets whatever text happens to sit there.
+#+end_quote
+
+*** Where chips are not drawn
+
+A rule's regexp sees only its own match, so on its own it would draw =[#A]=
+inside a source block, =[1/2]= inside a ~=verbatim=~ span, and =[3/4]= inside
+a link. ~org-svg-chips-predicate~ refuses those, and
+~org-svg-chips-mode~ installs it as the ~svg-chip-predicate~.
+
+It decides using the face Org has already put on that text, refusing these
+four:
+
+| ~org-block~    | source, example and export blocks   |
+| ~org-code~     | ~code~ spans and fixed-width =:= lines  |
+| ~org-verbatim~ | =verbatim= spans                      |
+| ~org-link~     | links, target and description alike |
+
+The first three are shown exactly as typed, which is the whole point of typing
+them that way. ~org-link~ covers a link as a whole — bracketed, plain or angled
+— so nothing inside one is drawn, a timestamp used as a link description
+included. A quote block carries none of these faces, so its prose is chipped
+like any other text.
+
+Reading a face Org set is only reliable because ~svg-chip-mode~ *appends* its
+keywords: Org's own have run over the text by the time the predicate is asked.
+The check costs 0.7µs, against 275µs to build a chip.
+
+** Notes
+
+#+begin_quote
+[!NOTE]
+Chips are images, so they do not line up with ~org-tags-column~: Org
+measures alignment in columns, and an image is measured in pixels. Set
+~org-tags-column~ to =0= to keep tags right next to the headline text.
+#+end_quote
+
