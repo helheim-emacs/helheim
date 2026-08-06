@@ -1,0 +1,329 @@
+#+title: helheim-typst — Typst authoring in Emacs
+
+Editing, checking and previewing [[https://typst.app][Typst]] documents. Three pieces, each owning
+one job: ~typst-ts-mode~ is the major mode, ~tinymist~ is the language server,
+and ~typst-preview~ gives a live preview that updates as you type.
+
+* Requirements
+
+Two required binaries and one optional, all looked up on ~PATH~:
+
+- ~typst~ (0.11+) — compiles documents.  Needed by =, c= / =, C= / =, w=.
+- ~tinymist~ — the language server, and also the preview backend.  Needed by
+  LSP and by =, p=.
+- ~pandoc~ — optional, and only for [[*Exporting Org to Typst — =ox-typst=][Org export]]: it translates Org's LaTeX math
+  into Typst math.  Without it the exporter falls back to a converter that
+  assumes you already wrote Typst syntax.
+
+Get ~tinymist~ from [[https://github.com/Myriad-Dreamin/tinymist][its releases page]], from ~cargo install --git
+https://github.com/Myriad-Dreamin/tinymist --locked tinymist-cli~, or with
+~M-x typst-ts-lsp-download-binary~, which fetches the latest release into
+~var/.cache/lsp/tinymist/~.
+
+The Emacs packages (~typst-ts-mode~, ~typst-preview~ and its ~websocket~
+dependency, ~ox-typst~) install automatically via Elpaca on first start.  The tree-sitter
+grammar is registered in ~treesit-language-source-alist~ and built by Helheim's
+~helheim-install-missing-treesit-grammars~, which offers to install anything
+missing after startup — so a C compiler and Git must be available the first
+time.
+
+#+begin_quote
+[!NOTE]
+~typst-ts-mode~ is on NonGNU ELPA, but that tarball trails the repository by
+a long way, so this module tracks the ~main~ branch on Codeberg directly.
+That is upstream's own recommended Elpaca recipe.
+#+end_quote
+
+* Why this is not a port of ~helheim-latex~
+
+~helheim-latex~ is mostly an input-acceleration layer: CDLaTeX symbol and
+modifier keys, ~aas~ auto-expanding snippets, wrapping fractions,
+sized-delimiter triggers.  All of it exists because LaTeX math is verbose.
+
+Typst's math syntax already *is* what those layers simulate:
+
+| LaTeX                   | Typst                     | What the layer buys you |
+|-------------------------+---------------------------+-------------------------|
+| ~\alpha~                       | ~alpha~                     | CDLaTeX's =`a=            |
+| ~\frac{a+b}{5}~           | ~(a+b)/5~                   | the =//= snippet          |
+| ~x^{2}~, ~x_{1}~            | ~x^2~, ~x_1~                  | CDLaTeX's auto-braces   |
+| ~\to~, ~\neq~, ~\leq~                 | ~->~, ~!=~, ~<=~                | the ~aas~ snippet table   |
+| ~\left( … \right)~        | ~( … )~ — scales on its own | the =((= trigger          |
+| ~\begin{align}…\end{...}~ | ~$ … & … \ … $~             | ~cdlatex-environment~     |
+
+So this module ships no ~aas~ block and no CDLaTeX equivalent — adding one
+would mean typing /more/ characters to produce the same output.  Bare ~/~ is
+already the fraction operator, so a ~laas~-style ~/~ binding would actively
+break Typst.
+
+What genuinely has no shorthand is the set of ~1700 named symbols and emoji
+(~arrow.r.long~, ~integral.cont~, ~emoji.rocket~, …). That is what =, s= is for.
+
+The one thing ~helheim-latex~ has that Typst still lacks is preview *inside* the
+buffer. See [[*A — inline previews in the buffer (=tip=)][Upgrade A]].
+
+* The pieces
+
+** typst-ts-mode — the major mode
+
+Tree-sitter powered.  Beyond font-lock and indentation you get:
+
+- *Structural editing* on =M-<arrows>=, dispatching on what is at point:
+  headings move up/down and change level, list items move and re-indent, grid
+  and table cells move in all four directions.  =M-RET= inserts the next list
+  item; =TAB= cycles a list item's indentation.
+- *Outline and imenu* over ~=~ headings and ~#let~ definitions —
+  ~outline-minor-mode~ is enabled for you, so folding and the navigation keys
+  below work out of the box, as does ~consult-imenu~.
+- *Raw block highlighting.*  A ~```rust … ```~ block is fontified in Rust's own
+  mode.  Enabled here (~typst-ts-enable-raw-blocks-highlight~); off upstream.
+- *Rendered scripts.*  Sub- and superscripts are displayed raised and lowered
+  rather than flat, via ~typst-ts-math-script-display~.
+- *A symbol picker* over the full symbol and emoji tables, which inserts with
+  the right prefix for where point is — bare in math, ~#sym.~ / ~#emoji.~ in
+  markup, module-qualified in code.
+- *Compile drivers* for ~typst compile~ and ~typst watch~, plus a
+  ~typst-main-file~ file-local variable so a chapter file compiles the book.
+
+** tinymist — the language server
+
+Completion, hover, goto-definition, rename, diagnostics, and formatting with
+~typstyle~ (bundled in the ~tinymist~ binary).
+
+The module hooks ~helheim-lsp~ into ~typst-ts-mode-hook~, which starts whichever
+client you required in ~init.el~:
+
+- *lsp-mode* — since 10.0.0 it ships ~lsp-typst.el~, a complete tinymist client,
+  and already maps ~typst-ts-mode~ in ~lsp-language-id-configuration~.  Nothing
+  to register; settings live under the ~lsp-typst~ Customize group.
+- *Eglot* — has no Typst entry, and upstream ~typst-ts-mode~ deliberately ships
+  none either so as not to clobber yours.  This module appends one.  Appended,
+  not pushed: an entry you add yourself still wins.
+
+Two server settings this module states explicitly:
+
+| Variable               | Here  | Why                                                      |
+|------------------------+-------+----------------------------------------------------------|
+| ~lsp-typst-export-pdf~   | ~never~ | previewing is the preview module's job, not the server's |
+| ~lsp-typst-lint-enabled~ | ~t~     | tinymist's lint pass, on top of compiler diagnostics     |
+
+~never~ is tinymist's own default; it is written down because ~"onType"~ is the
+usual first thing people reach for, and it fights ~typst-preview~ — two
+processes recompiling the same document on every keystroke.  Pick one.
+
+** typst-preview — live preview
+
+=, p= (~typst-preview-mode~) starts a ~tinymist preview~ process — separate from
+the language server — and connects to it over a websocket.  The buffer is
+pushed on *every keystroke*, so the preview tracks text you have not saved.
+
+- It asks for a *master file* on first start, defaulting to the current one.
+  That is what makes ~#include~-based multi-file projects work: open a chapter,
+  point it at the book, and edits render in the book's context.  Answer the
+  follow-up prompt to pin it as a file-local variable.
+- =, j= (~typst-preview-send-position~) scrolls the preview to point.  Clicking
+  in the preview jumps the buffer the other way.
+- ~typst-preview-partial-rendering~ is enabled here (off upstream): only the
+  visible part of the document is rendered, which on a long document is the
+  whole point of a live preview.
+- Colors follow the system light/dark setting
+  (~typst-preview-invert-colors~ = ~"auto"~).
+
+To keep the preview inside Emacs instead of opening a browser, on an
+~--with-xwidgets~ build:
+
+#+begin_src elisp
+(setopt typst-preview-browser "xwidget")
+#+end_src
+
+Other values are ~"default"~ (hands the URL to ~browse-url~, the default here)
+and ~"eaf-browser"~.  For slides, ~M-: (setq-local typst-preview-preview-mode
+"slide")~ before starting, or set it as a file-local variable.
+
+*** The lighter alternative
+
+=, w= (~typst-ts-watch-mode~) runs ~typst watch~ in the background: the PDF on
+disk is rebuilt on every save and whatever viewer you already use refreshes it.
+No tinymist, no websocket, no browser — but it updates on /save/ rather than
+per keystroke, and there is no source ↔ preview jumping.  Compilation errors
+pop up in a window at the bottom and disappear when fixed.
+
+To have the watch open the PDF as soon as it starts:
+
+#+begin_src elisp
+(setopt typst-ts-watch-options '("--open"))
+#+end_src
+
+* Org-mode integration
+
+Two things work; a third does not exist.
+
+** Exporting Org to Typst — ~ox-typst~
+
+[[https://github.com/jmpunkt/ox-typst][~ox-typst~]] registers a ~typst~ back-end under =y= in ~org-export-dispatch~:
+=C-c C-e y f= writes a =.typ=, =y p= compiles it to PDF, =y o= compiles and
+opens, =y F= dumps it into a buffer.  It is purely additive — ~ox-latex~ is
+untouched, so =C-c C-e l p= still goes through LaTeX.
+
+Beyond the usual Org elements it handles Typst's own citation and bibliography
+machinery (~#+BIBLIOGRAPHY:~ plus ~#+CITE_EXPORT: typst apa~), raw Typst via
+~#+TYPST:~ or ~#+begin_export typst~, and theme rules pulled in with
+~#+INCLUDE: "./theme.typ" export typst~.
+
+*** Math is the one real friction point
+
+Org's math syntax is LaTeX.  Typst's is not, and the two are incompatible, so
+every ~\( … \)~, ~\[ … \]~ and ~\begin{align}…\end{align}~ has to be translated
+on the way out.  ~ox-typst~ offers two strategies, chosen by
+~org-typst-from-latex-fragment~ and ~org-typst-from-latex-environment~.  The
+choice is global — the two cannot be mixed inside one document.
+
+| Converter                        | What it does                                                           |
+|----------------------------------+------------------------------------------------------------------------|
+| ~org-typst-from-latex-with-pandoc~ | pipes each fragment through ~pandoc -f latex -t typst~                   |
+| ~org-typst-from-latex-with-naive~  | assumes the fragment is /already/ Typst; only swaps the delimiters for ~$~ |
+
+This module picks *pandoc* when ~pandoc~ is on ~PATH~, and falls back to naive
+otherwise.  That is the setting that matches the rest of this configuration:
+~helheim-latex~ exists precisely to make you type LaTeX math into Org files, so
+something has to translate it.  It translates well —
+
+| Org (LaTeX)                      | Typst                                    |
+|----------------------------------+------------------------------------------|
+| ~\(\alpha_i^2 + \frac{a+b}{5}\)~        | ~$alpha_i^2 + frac(a + b, 5)$~             |
+| ~\[\sum_{k=0}^{n}\binom{n}{k}\]~      | ~$ sum_(k = 0)^n binom(n, k) $~            |
+| ~\mathbf{v} \cdot \mathbf{w}~          | ~upright(bold(v)) dot.op upright(bold(w))~ |
+| ~\begin{align} x &= … \end{align}~ | ~$ x & = … \ … $~                          |
+
+#+begin_quote
+[!CAUTION]
+The naive converter *silently drops* ~\begin{…}\end{…}~ environments — they
+vanish from the output rather than erroring.  It only recognises ~$…$~,
+~\(…\)~ and ~\[…\]~.  Use it only if you actually write Typst syntax inside
+your Org math delimiters.
+#+end_quote
+
+Per-file overrides are possible with ~#+BIND:~, which needs
+~(setopt org-export-allow-bind-keywords t)~.
+
+** Typst source blocks inside Org
+
+~#+begin_src typst~ blocks edit in ~typst-ts-mode~ under =C-c '= / =z '=.  This
+needs a mapping: ~org-src-get-lang-mode~ appends ="-mode"= to the language name
+and there is no ~typst-mode~, so without the entry this module adds to
+~org-src-lang-modes~ the block would open in ~fundamental-mode~.
+
+#+begin_quote
+[!NOTE]
+There is no ~ob-typst~ — Typst blocks are edited and exported, not /executed/.
+~C-c C-c~ on one does nothing.
+#+end_quote
+
+** What does not exist: Typst as Org's math preview engine
+
+The obvious wish is to swap ~xelatex~ + ~dvisvgm~ out of
+~org-preview-latex-process-alist~ for ~typst~, since Typst compiles a fragment
+in milliseconds where LaTeX takes a good fraction of a second.  Nobody has
+published this, and it is harder than it looks:
+
+- ~org-create-formula-image~ writes a complete =.tex= file — ~\documentclass~,
+  preamble, ~\begin{document}~ — and hands its path to ~:latex-compiler~.
+  Typst cannot read that, so a process entry would have to strip the wrapper
+  back down to the fragment and re-emit it as ~.typ~ before compiling.
+- The fragment is still LaTeX, so it would additionally need
+  [[https://github.com/OrangeX4/mitex][MiTeX]] (a Typst package that parses LaTeX math) or a pandoc pass on every
+  single preview — which gives back much of the time Typst just saved.
+
+If the speed of previews is the actual problem, the cheaper fix is
+[[*A — inline previews in the buffer (=tip=)][~tip~]] on the Typst side, or tecosaur's ~org-latex-preview~ engine on the Org
+side (see ~helheim-latex~, Upgrade A) — it caches and batches fragments, which
+is where most of the wall-clock time goes.
+
+* Keybindings
+
+=,= is the local leader, as in the Org and Markdown modules; =C-c t= is the
+shared toggle group.  All of these are in ~typst-ts-mode-map~.
+
+| Key     | Command                        | Does                            |
+|---------+--------------------------------+---------------------------------|
+| =, ,=     | ~typst-ts-tmenu~                 | the full transient menu         |
+| =, c=     | ~typst-ts-compile~               | compile to PDF                  |
+| =, C=     | ~typst-ts-compile-and-preview~   | compile, then open the PDF      |
+| =, o=     | ~typst-ts-preview~               | open the existing PDF           |
+| =, m=     | ~typst-ts-main-file-ask~         | set the file that gets compiled |
+| =, w=     | ~typst-ts-watch-mode~            | toggle ~typst watch~              |
+| =, p=     | ~typst-preview-mode~             | toggle the live preview         |
+| =, j=     | ~typst-preview-send-position~    | scroll the preview to point     |
+| =, s=     | ~typst-ts-editing-symbol-picker~ | insert a symbol or emoji        |
+| =, l=     | ~typst-ts-mc-insert-link~        | insert a relative file link     |
+| =, e=     | ~typst-ts-mc-export-to-markdown~ | export via pandoc               |
+| =g o=     | ~typst-ts-mc-open-at-point~      | follow the link/file at point   |
+| =z '=     | ~typst-ts-edit-indirect~         | edit the code block at point    |
+| =C-j=     | ~outline-next-heading~           | next heading                    |
+| =C-k=     | ~outline-previous-heading~       | previous heading                |
+| =z u=     | ~outline-up-heading~             | up one level                    |
+| =z C-j=   | ~outline-forward-same-level~     | next sibling heading            |
+| =z C-k=   | ~outline-backward-same-level~    | previous sibling heading        |
+| =C-c t p= | ~typst-preview-mode~             | toggle the live preview         |
+| =C-c t w= | ~typst-ts-watch-mode~            | toggle ~typst watch~              |
+
+The online searches — symbol lookup, handwritten-symbol recognition, package
+search — have no key of their own; reach them through =, ,=.
+
+~typst-ts-mode~ also binds these itself, and they are left alone:
+
+| Key            | Command                      | Does                                    |
+|----------------+------------------------------+-----------------------------------------|
+| =M-<up/down>=    | ~typst-ts-editing-meta-*~      | move the heading / item / cell at point |
+| =M-<left/right>= | ~typst-ts-editing-meta-*~      | change heading level, re-indent an item |
+| =M-RET=          | ~typst-ts-editing-meta-return~ | insert the next list item               |
+| =TAB=            | ~typst-ts-editing-cycle~       | cycle a list item's indentation         |
+| =RET=            | ~typst-ts-editing-return~      | electric return (continues lists)       |
+
+#+begin_quote
+[!NOTE]
+=z '= shadows the global ~separedit~ binding inside Typst buffers, exactly as
+~helheim-markdown~ does.  ~typst-ts-edit-indirect~ is the right tool here: it
+opens the raw block at point in that language's own major mode.
+#+end_quote
+
+* Customizing
+
+- *Wrapping*: prose is soft-wrapped with ~+wrap-line-mode~, as in
+  ~helheim-markdown~.  Swap the hook in ~helheim-typst.el~ for ~auto-fill-mode~
+  to hard-wrap instead.
+- *Preview in Emacs*: ~(setopt typst-preview-browser "xwidget")~.
+- *Formatter*: ~lsp-typst-formatter-mode~ (~"typstyle"~, ~"typstfmt"~ or
+  ~"disable"~), with ~lsp-typst-formatter-indent-size~ and
+  ~lsp-typst-formatter-print-width~.
+- *Fonts for the compiler*: ~lsp-typst-font-paths~, and ~--font-path~ in
+  ~typst-ts-compile-options~ for the CLI side.
+- *Multi-file projects*: set ~typst-main-file~ as a file-local variable (=, m=
+  offers to do it), and ~lsp-typst-root-path~ if absolute paths in the document
+  should resolve somewhere other than the workspace root.
+- *Disable a piece*: remove the relevant ~:hook~ from ~helheim-typst.el~.
+
+* Upgrades (documented, not enabled)
+
+Both are spelled out as commented blocks at the end of ~helheim-typst.el~.
+
+** A — inline previews in the buffer (=tip=)
+
+[[https://git.sr.ht/~mafty/tip][~tip~]] (Typst Inline Preview) is the one piece of the ~helheim-latex~ experience
+Typst has no equivalent for: equations rendered as images in the buffer,
+revealed as source when the cursor enters them — what ~org-latex-preview~ and
+~org-fragtog~ do for Org.  It can also feed the preview to eldoc.
+
+#+begin_quote
+[!CAUTION]
+It does not stand alone.  ~tip~ talks to a separate Python JSON-RPC server
+(~tip-server-py~) that you must clone and start yourself — upstream says
+automating this is still a TODO — and describes the project as "in a very early
+stage".  Revisit when the server is bundled.
+#+end_quote
+
+** B — ~typst watch~ instead of a live preview
+
+Described under [[*The lighter alternative][The lighter alternative]] above. It needs nothing enabling: it
+is built into ~typst-ts-mode~ and already bound to =, w=. The commented block
+only records the ~--open~ option.
