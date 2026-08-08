@@ -5,47 +5,6 @@
 (require 'org)
 (require 'hel)
 
-;;; Add padding to headings
-
-(defun helheim-org--add-padding-to-headings ()
-  "Replace the 2nd element in `org-font-lock-extra-keywords' responsible for
-heading fontification."
-  (setf (nth 1 org-font-lock-extra-keywords)
-        `(,(if org-fontify-whole-heading-line
-               "^\\(\\**\\)\\(\\*\\)\\( \\)\\(.*\n?\\)"
-             "^\\(\\**\\)\\(\\*\\)\\( \\)\\(.*\\)")
-          (1 (helheimg-org--level-face 1))
-          (2 (helheimg-org--level-face 2))
-          (3 (helheimg-org--level-face 3))
-          (4 (helheimg-org--level-face 4)))))
-
-(defun helheimg-org--level-face (n)
-  "Get the right face for match N in font-lock matching of headlines."
-  (let* ((org-l0 (- (match-end 3) (match-beginning 1) 1))
-         (org-l (if org-odd-levels-only (1+ (/ org-l0 2)) org-l0))
-         (face (if org-cycle-level-faces
-                   (nth (% (1- org-l) org-n-level-faces) org-level-faces)
-                 (nth (1- (min org-l org-n-level-faces)) org-level-faces))))
-    (cond ((eq n 1) (if org-hide-leading-stars 'org-hide face))
-          ((eq n 2) face)
-          ((eq n 3) 'helheim-org-heading-padding-face)
-          (t (unless org-level-color-stars-only face)))))
-
-;;; Prettify symbols mode
-
-(defun helheim-org-prettify-compose-p (start end _match)
-  "Like `prettify-symbols-default-compose-p', but ignore strings.
-The default predicate refuses to compose anything for which `syntax-ppss'
-reports that point is inside a string or comment. If you have an
-unmatched quote, everything after the last quote in the buffer will be
-treated as being inside a string and will be displayed unprettified."
-  (let ((syntaxes-beg (if (memq (char-syntax (char-after start)) '(?w ?_))
-                          '(?w ?_) '(?. ?\\)))
-        (syntaxes-end (if (memq (char-syntax (char-before end)) '(?w ?_))
-                          '(?w ?_) '(?. ?\\))))
-    (not (or (memq (char-syntax (or (char-before start) ?\s)) syntaxes-beg)
-             (memq (char-syntax (or (char-after end) ?\s)) syntaxes-end)))))
-
 ;;; org-attach
 
 (defun helheim-org-attach-id-ts-folder-format (id)

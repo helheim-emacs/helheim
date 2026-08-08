@@ -122,6 +122,7 @@
         org-modules '(ol-bibtex ol-docview ol-info))
 
 (require 'helheim-org)
+(require 'helheim-pretty-org)
 (require 'helheim-org-node)
 (require 'helheim-daily-notes)
 
