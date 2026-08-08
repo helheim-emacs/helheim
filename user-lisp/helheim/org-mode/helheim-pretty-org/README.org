@@ -1,0 +1,56 @@
+* helheim-pretty-org
+
+Visual polish for Org mode buffers: SVG chips for keywords and tags, extra
+heading padding, prettified block delimiters, headline bullets, and
+auto-hidden emphasis markers.
+
+** Enable
+#+begin_src emacs-lisp
+(require 'helheim-pretty-org)
+#+end_src
+
+** Features
+
+- TODO keywords, priority cookies, progress cookies, tags, and timestamps
+  render as rounded SVG chips, in both Org buffers and the agenda.
+- Heading lines get blank space above and below them, so that nodes read as
+  separate blocks while the body text of a node stays tight. Controlled by
+  the ~helheim-org-heading-padding~ variable.
+- Block delimiters (~#+begin_src~, ~#+end_src~ and others) render as single icons.
+- Headline and list bullets are displayed with ~●~, ~•~, and ~‣~.
+- Emphasis markers (~*bold*~, ~/italic/~, ...) are hidden and only shown around
+  the point.
+
+** Customization
+
+- Heading padding is controlled by ~helheim-org-heading-padding~. The value is
+  a fraction of the heading's own line height, added above and below every
+  heading line. A number pads both sides equally; a cons cell sets each side
+  on its own:
+
+  #+begin_src emacs-lisp
+  (setopt helheim-org-heading-padding 0.5)          ; half a line on each side
+  (setopt helheim-org-heading-padding '(0.45 . 0.15)) ; wide above, narrow below
+  (setopt helheim-org-heading-padding nil)          ; no padding
+  #+end_src
+
+  It must be set with ~setopt~ — the value is applied by a ~:set~ function,
+  which also refreshes the Org buffers you already have open.
+
+  The padding is a tall, invisible stretch glyph placed on the space between
+  the stars and the heading text, so it changes nothing else in the buffer and
+  follows the font size. A theme that scales the ~org-level-N~ faces keeps the
+  padding in proportion.
+
+  Two headings in a row each keep their own padding, which makes the gap
+  between them twice as wide as the gap around a heading with body text.
+
+- Each hack is a separate hook on ~org-mode-hook~, so you can remove the ones
+  you don't want:
+
+  #+begin_src emacs-lisp
+  (remove-hook 'org-mode-hook 'org-svg-chips-mode)
+  (remove-hook 'org-mode-hook 'helheim-org-prettify-blocks)
+  (remove-hook 'org-mode-hook 'org-superstar-mode)
+  (remove-hook 'org-mode-hook 'org-appear-mode)
+  #+end_src

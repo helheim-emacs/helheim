@@ -79,6 +79,7 @@ what you need.
   - [[file:user-lisp/helheim/snippets/README.org][snippets engine]]
 
 - [[file:user-lisp/helheim/org-mode/helheim-org/README.org][Org-mode]]
+  - [[file:user-lisp/helheim/org-mode/helheim-pretty-org/README.org][pretty-org]] — pretty Org-buffers with SVG tags
   - [[file:user-lisp/helheim/org-mode/helheim-org-node/README.org][org-node]] — personal knowledge management (Org-roam alternative)
   - [[file:user-lisp/helheim/org-mode/helheim-daily-notes/README.org][daily-notes]] — Daily scratchpad / Inbox
   - [[file:user-lisp/helheim/latex/README.org][latex]] — fast LaTeX-math typing in Org mode
