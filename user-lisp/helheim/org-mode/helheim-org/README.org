@@ -6,11 +6,6 @@
 
 ** Hacks
 
-- Extra padding is added to Org mode headings to make them more spacious. This
-  is done by increasing the height of the space character between the stars that
-  denotes the heading level and the heading text. Controled by
-  ~helheim-org-heading-padding~ variable.
-
 - Attach menu is prettified with faces.
 
 - Org ID format is configured to use an ISO 8601 timestamp — the same as [[https://protesilaos.com/emacs/denote][Denote]]:
@@ -24,25 +19,6 @@
   ╰┬╴2025/
    ╰─╴20250322T131856/
   #+end_example
-
-** Customization
-
-- Headline padding is controlled by ~helheim-org-heading-padding~. Set it to
-  ~nil~ to disable:
-
-  #+begin_src emacs-lisp
-  (setopt helheim-org-heading-padding nil)
-  #+end_src
-
-  It must be set with ~setopt~ — the value is applied by a ~:set~ function.
-
-- ~prettify-symbols-mode~ is enabled in Org-mode buffers. To disable remove
-  the coresponding hook:
-
-  #+begin_src emacs-lisp
-  (remove-hook 'org-mode-hook 'helheim-org-prettify-todo-keywords)
-  (remove-hook 'org-mode-hook 'helheim-org-prettify-blocks)
-  #+end_src
 
 ** Keybindings
 *** Org-mode buffer
@@ -113,23 +89,23 @@ Keys that are worth mentioning (for others see =helheim-org-keys= file):
 
 **** Notes (=C-c n=)
 
-| =SPC n b= | Backlinks buffer for node at point                      |
+| =SPC n b= | Backlinks buffer for node at point                     |
 | =SPC n i= | Add ID to heading — make it a node                     |
 | =SPC n I= | Add ID and =ROAM_EXCLUDE= properties — don't make a node |
-| =SPC n w= | Refile node                                             |
+| =SPC n w= | Refile node                                            |
 
 **** Insert (=, i=)
 
-| =, i ,= | ~org-priority~                                            |
-| =, i a= | Add alias to current node                               |
-| =, i e= | ~org-set-effort~                                          |
-| =, i n= | ~org-add-note~                                            |
-| =, i m= | ~yank-media~                                              |
+| =, i ,= | ~org-priority~                                           |
+| =, i a= | Add alias to current node                              |
+| =, i e= | ~org-set-effort~                                         |
+| =, i n= | ~org-add-note~                                           |
+| =, i m= | ~yank-media~                                             |
 | =, i i= | Add ID to heading — make it a node                     |
 | =, i I= | Add ID and =ROAM_EXCLUDE= properties — don't make a node |
-| =, i p= | Set nodes property                                      |
-| =, i q= | Add tags to current node                                |
-| =, i Q= | Set tags of current node                                |
+| =, i p= | Set nodes property                                     |
+| =, i q= | Add tags to current node                               |
+| =, i Q= | Set tags of current node                               |
 
 | =, i t= | Insert a time stamp            |
 | =, i T= | Insert an inactive time stamp. |
@@ -138,11 +114,11 @@ Keys that are worth mentioning (for others see =helheim-org-keys= file):
 
 **** Links (=, l=)
 
-| =, l n= | Insert link to node                     |
-| =, l t= | Insert node translusion                 |
-| =, l y= | Insert node translusion as subtree      |
-| =, l s= | Store a link to the current location    |
-| =, l a= | ~org-insert-all-links~                    |
+| =, l n= | Insert link to node                    |
+| =, l t= | Insert node translusion                |
+| =, l y= | Insert node translusion as subtree     |
+| =, l s= | Store a link to the current location   |
+| =, l a= | ~org-insert-all-links~                   |
 | =, l u= | Update all ID locations — repare links |
 
 **** Node (=, n=) — subtree
