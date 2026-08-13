@@ -82,9 +82,36 @@ icon alone, with no tag name next to it:
             (\"cpp\"    :icon \"language-cpp\" :collection \"material\")
             (\"urgent\" :inverse t)))
 
-Tags with no entry here are drawn in the `org-tag' face."
+A tag this does not name is left to `org-svg-chips-tag-style-function',
+and drawn in the `org-tag' face where that has nothing to say either."
   :type '(alist :key-type (string :tag "Tag")
                 :value-type (plist :tag "Chip style"))
+  :group 'org-svg-chips)
+
+(defcustom org-svg-chips-tag-style-function nil
+  "Function returning the chip style of one tag, or nil.
+
+It is called with a tag written without its colons, and returns a plist
+of `svg-chip' arguments or nil. Use it where the styles are not a list
+anyone could write down -- where they are read from the Org files
+themselves, say:
+
+  (setopt org-svg-chips-tag-style-function
+          (lambda (tag)
+            (when-let* ((color (skald-tag-color tag)))
+              (list :face (list :background color
+                                :foreground (readable-foreground-color color))
+                    :stroke 0))))
+
+`org-svg-chips-tag-styles' wins over this, key by key: a tag given an
+icon by hand keeps that icon and takes its colour from here.
+
+It is asked about every tag of every headline drawn, so it has to be
+cheap. Returning a fresh list each time costs nothing: the image cache
+is keyed on the style with `equal', so two styles that look alike are
+one chip."
+  :type '(choice (const :tag "None" nil)
+                 (function :tag "Function of one tag"))
   :group 'org-svg-chips)
 
 ;;; TODO keyword
@@ -230,14 +257,26 @@ The date is read from group 2 of the match and the tail from group 3."
 group 1 is the whole `:tag:' that the chip covers. The leading colon is
 optional because the tag before this one has usually claimed it already.")
 
+(defun org-svg-chips-tag-style (tag)
+  "Return the chip style of TAG, written without its colons, or nil.
+
+`org-svg-chips-tag-styles' is looked up without regard to case, the way
+Org compares tags, and `org-svg-chips-tag-style-function' is asked as
+well. The two are merged key by key, and what is written by hand wins:
+a plist lookup finds the first value there is, so a tag given an icon in
+the alist keeps that icon and still takes a colour from the function."
+  (append (alist-get tag org-svg-chips-tag-styles
+                     nil nil #'string-equal-ignore-case)
+          (and org-svg-chips-tag-style-function
+               (funcall org-svg-chips-tag-style-function tag))))
+
 (defun org-svg-chips-render-tag (tag)
   "Return the chip image drawn for TAG, written as it is in the buffer:
 \":work:\", or \"work:\" where the tag before it has already claimed the
 leading colon.
 `svg-chip' caches the image, so a tag drawn once is not drawn again."
   (let* ((tag (string-trim tag ":" ":"))
-         (style (alist-get tag org-svg-chips-tag-styles
-                           nil nil #'string-equal-ignore-case))
+         (style (org-svg-chips-tag-style tag))
          (label (if (plist-get style :icon) "" tag)))
     (apply #'svg-chip label (append style '(:face org-tag :margin 1)))))
 
