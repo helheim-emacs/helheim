@@ -370,6 +370,30 @@ the default.
           ("urgent" :inverse t)))
 #+end_src
 
+**** A style computed per tag
+
+Some styles are not a list anyone could write down — a colour kept in the Org
+files themselves, say. ~org-svg-chips-tag-style-function~ is called with one
+tag, written without its colons, and returns a style plist or nil:
+
+#+begin_src emacs-lisp
+;; Colour every tag by the :COLOR: property of its hub node.
+(setopt org-svg-chips-tag-style-function
+        (lambda (tag)
+          (when-let* ((color (skald-tag-color tag)))
+            (list :face (list :background color
+                              :foreground (readable-foreground-color color))
+                  :stroke 0))))
+#+end_src
+
+The alist wins over it *key by key*, so the two work together rather than
+replacing each other: =attach= keeps its paperclip and still takes whatever
+colour the function computes for it.
+
+The function is asked about every tag of every headline drawn, so it has to be
+cheap. Returning a fresh list each time costs nothing — the image cache is
+keyed on the style with ~equal~, so two styles that look alike are one chip.
+
 *** The rules
 
 ~org-svg-chips-rules~ is the full list of what Org draws, in the format that
