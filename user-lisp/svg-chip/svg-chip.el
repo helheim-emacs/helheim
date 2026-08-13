@@ -114,6 +114,15 @@ single lookup."
 
 ;;; Drawing a chip
 
+(defvar svg-chip-background nil
+  "Colour to fill a chip with, in place of the one its face gives it.
+
+A chip is drawn to sit on the buffer's own background: it takes it from the
+`:background' of the face the chip is drawn in, which for most faces is the
+default background. Bind this around a call that draws a chip somewhere
+else -- on the band of a table, say, where a chip filled with the default
+background would read as a hole in it.")
+
 (defun svg-chip (label &rest args)
   "Draw LABEL as a rounded chip and return the image.
 
@@ -132,7 +141,8 @@ ARGS are the style keywords that `svg-lib-text-tag' accepts -- see
   (setq label (substring-no-properties (string-trim label)))
   (let* ((face (plist-get args :face))
          (foreground (svg-chip--face-attribute face :foreground))
-         (background (svg-chip--face-attribute face :background))
+         (background (or svg-chip-background
+                         (svg-chip--face-attribute face :background)))
          (icon (plist-get args :icon))
          ;; `svg-lib-style' uses the first value it finds for a key, so putting
          ;; ARGS first lets the caller's values override our defaults below.
@@ -272,10 +282,32 @@ on using `match-beginning' and friends."
       ;; does the same for the renderer, whose match must survive the
       ;; predicate; `syntax-ppss' searches too.
       (save-match-data
-        (when (save-match-data (funcall predicate beg end text))
+        (when (and (save-match-data (funcall predicate beg end text))
+                   ;; Nothing at all, not even the cursor sensor: the text is
+                   ;; somebody else's to draw, and theirs to put back when the
+                   ;; cursor reaches it.
+                   (not (svg-chip--drawn-p beg end)))
           `(,@(unless (svg-chip--region-revealed-p beg end)
                 `(display ,(funcall renderer text)))
             cursor-sensor-functions (svg-chip--cursor-sensor-function)))))))
+
+(defun svg-chip--drawn-p (beg end)
+  "Non-nil when something already draws the text from BEG to END.
+
+A `display' property on that text belongs to whoever put it there first, and
+a chip on top of it takes a bite out of the middle of their run. The display
+engine draws a replacing string once per run, so the text they replaced then
+appears twice, once on each side of the chip.
+
+Such a match is left alone completely, the cursor sensor included. Revealing
+the text under a chip means taking the `display' property off it, and taking
+one off that this package did not put on would tear a hole in whatever the
+other one is drawing.
+
+This is what makes the promise in `svg-chip-rules' true, that an earlier rule
+wins over a later one. It also keeps chips out of a region another package
+draws whole -- a folded Org property drawer shown as a table, say."
+  (and (text-property-not-all beg end 'display nil) t))
 
 (defun svg-chip--highlight (renderer &optional predicate)
   "Return a font-lock FACENAME value drawing this match as a chip with RENDERER.
@@ -285,10 +317,9 @@ properties; the nil after it is what stops it setting a face of its own."
   (when-let* ((props (svg-chip-render renderer predicate)))
     `(face nil . ,props)))
 
-(defun svg-chip--convert-rule-to-font-lock-keyword (rule)
-  "Return `font-lock-keywords' entry for RULE from `svg-chip-rules', or nil.
-The rule's matcher is handed to font-lock as it is, so a regexp and a search
-function both mean there exactly what they mean in `font-lock-keywords'."
+(defun svg-chip--rule-parts (rule)
+  "Return RULE from `svg-chip-rules' as (MATCHER RENDERER PREDICATE).
+RENDERER is nil for a rule that says nothing this package understands."
   (-let* (((matcher . spec) rule)
           ((renderer predicate) (pcase spec
                                   ;; A style plist has no code of its own to
@@ -306,8 +337,69 @@ function both mean there exactly what they mean in `font-lock-keywords'."
                                   ((and `(,fun . ,options)
                                         (guard (functionp fun)))
                                    (list fun (plist-get options :predicate))))))
-    `(,matcher
-      (1 (svg-chip--highlight ',renderer ',predicate)))))
+    (list matcher renderer predicate)))
+
+(defun svg-chip--convert-rule-to-font-lock-keyword (rule)
+  "Return `font-lock-keywords' entry for RULE from `svg-chip-rules', or nil.
+The rule's matcher is handed to font-lock as it is, so a regexp and a search
+function both mean there exactly what they mean in `font-lock-keywords'."
+  (-let [(matcher renderer predicate) (svg-chip--rule-parts rule)]
+    (when renderer
+      `(,matcher
+        (1 (svg-chip--highlight ',renderer ',predicate))))))
+
+(defun svg-chip--search (matcher limit)
+  "Search forward up to LIMIT with MATCHER, from `svg-chip-rules'.
+A matcher is what `font-lock-keywords' takes: the regexp to search for, or
+the function to call with the limit of the search."
+  (if (stringp matcher)
+      (re-search-forward matcher limit t)
+    (funcall matcher limit)))
+
+(defun svg-chip-spans (beg end)
+  "Return the chips `svg-chip-rules' would draw between BEG and END.
+
+A list of (START END IMAGE): the text one chip covers, and the image drawn
+over it. They come in buffer order and never overlap, an earlier rule
+winning over a later one, and a match reaching outside BEG..END is left out.
+`svg-chip-extra-font-lock-keywords' is not consulted -- only the rules are.
+
+Nothing is put on the buffer here. This is for a caller that draws that
+stretch of buffer itself and wants the chips in what it draws: a folded
+property drawer shown as a table, say, where the images have to be placed by
+whoever owns the region.  Bind `svg-chip-background' around the call to draw
+them on a background of that caller's own."
+  (let (spans)
+    (save-excursion
+      (save-match-data
+        (dolist (rule svg-chip-rules)
+          (-let [(matcher renderer predicate) (svg-chip--rule-parts rule)]
+            (when renderer
+              (let ((from beg))
+                (while (and (< from end)
+                            (progn (goto-char from)
+                                   (svg-chip--search matcher end)))
+                  (let ((start (match-beginning 1))
+                        (finish (match-end 1)))
+                    (when (and start
+                               (<= beg start) (<= finish end)
+                               (not (svg-chip--spanned-p spans start finish))
+                               (save-match-data
+                                 (funcall (or predicate svg-chip-predicate)
+                                          start finish
+                                          (match-string-no-properties 1))))
+                      (push (list start finish
+                                  (funcall renderer
+                                           (match-string-no-properties 1)))
+                            spans))
+                    ;; A rule that can match the empty string would search
+                    ;; from where it started for as long as it is let to.
+                    (setq from (if (> (point) from) (point) (1+ from)))))))))))
+    (sort spans (lambda (a b) (< (car a) (car b))))))
+
+(defun svg-chip--spanned-p (spans start end)
+  "Non-nil when one of SPANS already covers part of START to END."
+  (--any? (and (< start (nth 1 it)) (< (nth 0 it) end)) spans))
 
 ;;; Revealing the chip under the cursor
 

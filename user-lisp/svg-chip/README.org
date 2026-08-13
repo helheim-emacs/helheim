@@ -157,6 +157,39 @@ given a position, which makes the most obvious predicate to write also the one
 that would hang Emacs.
 #+end_quote
 
+*** Text somebody else already draws
+
+A chip is never drawn where a ~display~ property is already set. Whoever put
+that property there first is drawing that text, and a chip on top of it takes
+a bite out of the middle of their run: a replacing string is drawn once per
+run, so what they replaced would appear twice, once on each side of the chip.
+This is also what makes /earlier rules win over later ones/ true.
+
+Such a match is left alone completely — no cursor sensor either. Revealing a
+chip means taking the ~display~ property off it, and a sensor that took off a
+property this package never put on would tear a hole in whatever the other one
+is drawing.
+
+If you are that other package, ~svg-chip-spans~ hands you the chips rather
+than drawing them:
+
+#+begin_src emacs-lisp
+(let ((svg-chip-background (face-attribute 'my-band :background nil 'default)))
+  (svg-chip-spans beg end))
+;; => ((142 164 IMAGE) (170 176 IMAGE))
+#+end_src
+
+It runs the rules over the region and returns =(START END IMAGE)= for each
+match, in buffer order and never overlapping, touching nothing. Placing the
+images is then yours to do. ~skald-drawer-mode~ is the caller it exists for: a
+folded Org property drawer drawn as one table, in pieces, with the chips on
+the drawer's own characters between them.
+
+~svg-chip-background~ fills those chips with a colour of your own in place of
+the one their face gives them. A chip is drawn to sit on the buffer's
+background, so one dropped onto a coloured band without this reads as a hole
+in the band.
+
 *** When one rule is not enough
 
 One rule yields exactly one image per match.
