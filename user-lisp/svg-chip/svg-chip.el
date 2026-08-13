@@ -170,8 +170,13 @@ list, or a string naming a foreground colour."
          (face-attribute face attribute nil 'default))
         ((and (stringp face) (eq attribute :foreground))
          face)
-        ((and (consp face) (plist-get face attribute))
-         nil)
+        ;; `plist-member', not `plist-get': a plist that names an attribute
+        ;; owns it, even where the value it gives is nil.  A plist that leaves
+        ;; one out says nothing about it and falls through to the default,
+        ;; which is how `(:foreground "red")' draws red on whatever background
+        ;; the buffer already has.
+        ((and (consp face) (plist-member face attribute))
+         (plist-get face attribute))
         (t
          (face-attribute 'default attribute nil 'default))))
 
