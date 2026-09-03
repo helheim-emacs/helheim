@@ -1,0 +1,159 @@
+#+title: helheim-lean — Lean 4 in Emacs
+
+Editing and checking [[https://lean-lang.org][Lean 4]] proofs. Two pieces: ~lean4-mode~ is the major
+mode, and ~lake serve~ — part of the Lean toolchain — is the language server
+that elaborates the file and answers the question /what is left to prove
+here/.
+
+#+begin_example
+┌─────────────────────┐      ┌─────────────────────┐
+│ Theorem.lean        │  LSP │ lake serve          │
+│ lean4-mode          │◄────►│ (Lean toolchain)    │
+└─────────────────────┘      └─────────────────────┘
+           │                            │
+           │ point moves                │ $/lean/plainGoal
+           ▼                            ▼
+     ┌────────────────────────────────────────┐
+     │ *Lean Goal*   d  : Nat                 │
+     │               hd : d + 0 = d           │
+     │               ⊢ (d + 1) + 0 = d + 1    │
+     └────────────────────────────────────────┘
+#+end_example
+
+The ~*Lean Goal*~ buffer is the point of the whole setup. It lists the
+hypotheses in scope and the goal at point, and it refreshes after every
+tactic. Toggle it with =,g= it opens as a side window on the right.
+
+* Requirements
+
+One binary, looked up on ~PATH~:
+
+- ~lean~ and ~lake~ — installed together by [[https://github.com/leanprover/elan][elan]], the toolchain manager
+  (what ~rustup~ is to Rust). ~elan~ reads the ~lean-toolchain~ file of the
+  project you open and downloads the matching Lean version by itself.
+
+#+begin_src shell
+curl https://elan.lean-lang.org/elan-init.sh -sSf | sh
+#+end_src
+
+This installs into ~~/.elan~ and appends ~~/.elan/bin~ to ~PATH~ from ~~/.profile~.
+A graphical session does not always read ~~/.profile~, so the module adds that
+directory to ~exec-path~ and to ~PATH~ itself when it exists.
+
+The Emacs packages (~lean4-mode~ and its ~dash~, ~compat~, ~magit-section~
+and ~lsp-mode~ dependencies) install through Elpaca on first start.
+
+#+begin_quote
+[!IMPORTANT]
+~lean4-mode~ works with ~lsp-mode~ only. It registers an ~lsp-mode~ client and
+reads Lean's own LSP extensions (~$/lean/plainGoal~, ~$/lean/fileProgress~)
+through ~lsp-defun~. Eglot cannot drive it, so ~init.el~ must require
+~helheim-lsp-mode~ rather than ~helheim-eglot~.
+#+end_quote
+
+** Optional: a font with wide math coverage
+
+Lean source is full of Unicode: ⊢ ∀ ∃ ↦ ℕ ⨆ 𝓤. ~PragmataPro~ covers the common
+part. [[https://github.com/cormullion/juliamono][JuliaMono]] covers nearly all of it and is the usual fallback:
+
+#+begin_src elisp
+(helheim-set-fontset-font "JuliaMono"
+  '((#x2190 . #x22ff)    ; arrows, math operators
+    (#x1d400 . #x1d7ff)) ; mathematical alphanumeric symbols
+  :add 'append)
+#+end_src
+
+* Setup
+
+Add to ~init.el~:
+
+#+begin_src elisp
+(require 'helheim-lsp-mode)
+(require 'helheim-lean)
+#+end_src
+
+Then run =M-x prepare-user-lisp= to re-scan ~user-lisp/~ or restart Emacs.
+
+* Keys
+
+| Key     | Description                       | Command                         |
+|---------+-----------------------------------+---------------------------------|
+| =SPC t g= | Show or hide the ~*Lean Goal*~ pane | ~lean4-toggle-info~               |
+| =, g=     | Show or hide the ~*Lean Goal*~ pane | ~lean4-toggle-info~               |
+| =, b=     | Build the project with ~lake~       | ~lean4-lake-build~                |
+| =, c=     | Download the prebuilt Mathlib     | ~helheim-lean-mathlib-cache~      |
+| =, x=     | Run ~lean~ on this file alone       | ~lean4-std-exe~                   |
+| =, r=     | Recompile and reload the imports  | ~lean4-refresh-file-dependencies~ |
+| =, R=     | Restart the language server       | ~lsp-workspace-restart~           |
+| =, k=     | How to type the symbol at point   | ~quail-show-key~                  |
+| =, v=     | Print the Lean version            | ~lean4-show-version~              |
+
+~lean4-mode~ binds a few keys of its own on top of these:
+- =C-c C-i= (goals)
+- =C-c C-d= (reload imports)
+- =C-c C-x= and =C-c C-l= (run ~lean~)
+- =C-c C-p C-l= (~lake~ build)
+- =C-c C-k= (show key)
+
+Diagnostics come through Flycheck:
+- =]d= and =[d= step between errors
+- =SPC d d= lists them
+
+* Typing Unicode
+
+~lean4-mode~ turns on an input method named =Lean= in the buffer.
+It is a backslash abbreviation table:
+
+- =\alpha= gives α
+- =\to= gives →
+- =\nat= gives ℕ
+- =\<== gives ≤
+- =\|-= gives ⊢.
+
+To find out how a symbol was typed, put point on it and press =,k=.
+
+Extra abbreviations of your own go in ~lean4-input-user-translations~:
+
+#+begin_src elisp
+(setopt lean4-input-user-translations '(("tri" "△") ("hh" "ℏ")))
+#+end_src
+
+* Projects
+
+A Lean project is a directory with a ~lean-toolchain~ file. ~lean4-mode~ walks
+up from the file you open, takes the outermost such directory, and hands it
+to ~lsp-mode~ as the workspace root — so files of a sub-package are checked
+with the settings of the parent project.
+
+Create one with [[https://leanprover-community.github.io/mathlib4_docs/][Mathlib]] as a dependency:
+
+#+begin_src shell
+lake new my_project math
+cd my_project
+lake exe cache get
+#+end_src
+
+=, c= runs that last command from inside Emacs. It matters: building Mathlib
+from source takes hours, while the cache downloads the same object files in
+minutes. Run it again after ~lake update~.
+
+#+begin_quote
+[!NOTE]
+The cache is keyed on the exact Lean version, so ~lake exe cache get~ finds
+nothing when the project's toolchain and Mathlib disagree. Pinning the
+version at creation time avoids it: ~lake +v4.24.0 new my_project math~, with
+the version Mathlib currently builds against.
+#+end_quote
+
+* Learning
+
+Nothing has to be installed to start. [[https://adam.math.hhu.de/#/g/hhu-adam/NNG4][Natural Number Game]] runs in the browser,
+and [[https://live.lean-lang.org/][live.lean-lang.org]] is a full editor with Mathlib already loaded. This module
+is for the point at which you want your own files.
+
+- [[https://lean-lang.org/theorem_proving_in_lean4/][Theorem Proving in Lean 4]] — what is going on: types as propositions, terms as
+  proofs, where tactics come from.
+- [[https://leanprover-community.github.io/mathematics_in_lean/][Mathematics in Lean]] — working with Mathlib. Comes with an exercise repository
+  meant to be opened in an editor.
+- [[https://leanprover-community.github.io/papers/lean-tactics.pdf][Tactic cheat sheet]] (PDF) — every tactic on one page.
+- [[https://leanprover.zulipchat.com/#narrow/channel/468104-Emacs][#Emacs channel]] on the Lean Zulip — where ~lean4-mode~ itself is discussed.
