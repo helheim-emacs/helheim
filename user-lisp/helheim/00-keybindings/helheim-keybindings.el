@@ -30,6 +30,7 @@
   "C-c b"  "buffer / bookmark"
   "C-c d"  "diagnostic"
   "C-c f"  "file"
+  "C-c i"  "insert"
   "C-c o"  "open"
   "C-c p"  "project"
   "C-c t"  "toggle"

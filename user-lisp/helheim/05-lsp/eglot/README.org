@@ -19,7 +19,6 @@ Add the following line to your =init.el=:
   - [[https://github.com/emacs-sideline/sideline-flymake][sideline-flymake]]
   - [[https://github.com/emacs-sideline/sideline-eglot][sideline-eglot]]
 - [[https://github.com/joaotavora/breadcrumb][breadcrumb]]
-- [[https://github.com/fejfighter/eglot-tempel][eglot-tempel]]
 
 ** Customization
 
