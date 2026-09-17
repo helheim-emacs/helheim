@@ -1,37 +1,49 @@
 ;;; helheim-snippets.el -*- lexical-binding: t; no-byte-compile: t -*-
-;;; Keybindings
 
-(setup tempel
-  (:global-bind
-    ;; The "/" trigger reaches templates from the corfu popup.  These keys
-    ;; reach them without a slash, and from anywhere in a word.
-    "M-+"     'tempel-complete
-    ;; The leader "i" prefix.  `helheim-org' gave the key up because its own
-    ;; insert map is still reachable at the org local leader, ", i".
-    "C-c i i" '("template" . tempel-insert)
-    "C-c i c" '("complete template" . tempel-complete)))
-
-;;; Config
-
-(setup tempel
+(setup yasnippet
   (:install t)
-  ;; The "templates" file by default is under `user-emacs-directory', which
-  ;; Helheim points at var/ -- generated files only.
-  (:setopt tempel-path (expand-file-name "templates" helheim-root-directory))
+  ;; The default snippet directory is under `user-emacs-directory', which
+  ;; Helheim points at var/ and use for generated files only.
+  (:setopt yas-snippet-dirs `(,(expand-file-name "snippets" helheim-root-directory))
+           yas-verbosity (if debug-on-error 3 2)
+           yas-wrap-around-region t)
+  (yas-global-mode)
+  ;; (:hook (prog-mode
+  ;;         text-mode
+  ;;         conf-mode) yas-minor-mode-on)
+  ;;
+  (:after-load
+    (:keymap yas-minor-mode-map
+      (:unbind
+        "C-c & C-s"
+        "C-c & C-n"
+        "C-c & C-v"
+        "C-c &") ; `org-mark-ring-goto' in Org buffers
+      (:bind
+        "C-c i i" '("insert snippet" . yas-insert-snippet)
+        "C-c i n" '("create new snippet" . yas-new-snippet)
+        "C-c i v" '("visit snippet" . yas-visit-snippet-file))))
+  ;;
+  (with-eval-after-load 'hippie-exp
+    (add-to-list 'hippie-expand-try-functions-list 'yas-hippie-try-expand)))
+
+(setup yasnippet-capf
+  (:install t)
+  ;; How far back `thing-at-point-looking-at' scans for the word to complete.
+  ;; The default, nil, makes search till `point-min' on every keystroke.
+  (:setopt yasnippet-capf-max-search-distance 20)
   (:hook (prog-mode-hook
           text-mode-hook
           conf-mode-hook
-          lsp-completion-mode-hook)
-         (defun helheim-tempel-setup-capf ()
-           "Put both template Capfs at the head of the buffer-local Capf list."
-           ;; Type "/" to see the list of snippets.
-           (setq-local corfu-auto-trigger "/")
-           (add-hook 'completion-at-point-functions #'helheim-tempel-capf -100 t)
-           ;; Also add snippets to the general completion list.
-           (add-hook 'completion-at-point-functions #'tempel-complete -90 t)))
-  ;; Modes outside those families still reach the template Capf through
-  ;; the global value, behind whatever Capf they install for themselves.
-  (:hook completion-at-point-functions helheim-tempel-capf))
+          lsp-completion-mode-hook) helheim-yas-setup-capf))
+
+(defun helheim-yas-setup-capf ()
+  "Show snippets in the completion menu."
+  ;; Type "/" to open the completion menu with snippets.
+  (setq-local corfu-auto-trigger "/")
+  (add-hook 'completion-at-point-functions #'helheim-yas-trigger-capf -100 t)
+  ;; Also add snippets to the general completion menu.
+  (add-hook 'completion-at-point-functions #'helheim-yas-capf -90 t))
 
 ;;; .
 (provide 'helheim-snippets)

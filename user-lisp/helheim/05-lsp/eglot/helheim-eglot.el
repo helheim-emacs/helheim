@@ -105,14 +105,11 @@
   (setopt eldoc-box-self-insert-command-list '(self-insert-command)))
 
 ;; Eglot expands the snippets a language server sends by calling
-;; `yas-expand-snippet'. `eglot-tempel-mode' overrides that choice
-;; and hands the snippet to tempel instead, so eglot needs no yasnippet.
-;; The mode is global: turning it on once covers every managed buffer.
-;; See `helheim-snippets' for the template system itself.
-(setup eglot-tempel
-  (:install t)
-  (:after helheim-snippets)
-  (eglot-tempel-mode 1))
+;; `yas-expand-snippet', and asks the server for snippets only when
+;; YASnippet is installed. `helheim-snippets' configures it for your own
+;; snippets.
+(setup yasnippet
+  (:install t))
 
 (setup consult-eglot
   (:install t)
