@@ -438,7 +438,9 @@ by Helheim defaults. Use `setopt' for your custom settings."
 
 (defun helheim-setopt (variable value)
   "Set VARIABLE to VALUE only if it hasn’t been already changed."
-  (cond ((not (boundp variable))
+  (cond ((get variable 'custom-check-value) ; set by the user's `setopt'
+         nil)
+        ((not (boundp variable))
          (set-default variable value))
         ((equal (symbol-value variable)
                 (ignore-errors (custom--standard-value variable)))
