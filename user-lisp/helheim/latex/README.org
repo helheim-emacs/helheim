@@ -25,21 +25,23 @@ the ~:zoom~ property in ~org-latex-preview-appearance-options~.
 
 Active inside LaTeX fragments (~org-cdlatex-mode~).
 
-- =`= plus a letter inserts a symbol: =`a= → ~\alpha~, =`L= → ~\Lambda~,
-  =`8= → ~\infty~. Wait half a second and a hint window pops up. Press =`=
-  two or three times for deeper symbol layers.
+- =`= plus a letter inserts a symbol: =`a= → ~\alpha~, =`L= → ~\Lambda~, =`8= → ~\infty~.
 
-- ='= applies a modifier to the character before point: ='^= → ~\hat{}~,
-  ='-= → ~\bar{}~, ='>= → ~\vec{}~, ='.= → ~\dot{}~, ='~= → ~\tilde{}~,
-  ='b= → ~\mathbf{}~, ='c= → ~\mathcal{}~. Waiting pops up a hint window.
+  Wait half a second and a hint window pops up. Press =`= two or three
+  times for deeper symbol layers: =`|= gives ~\mid~, =``|= gives ~\mapsto~,
+  =```|= gives ~\longmapsto~.
+$a$
+- ='= applies a modifier to the character before point:
+  ='^= → ~\hat{}~, ='-= → ~\bar{}~, ='>= → ~\vec{}~, ='.= → ~\dot{}~, ='b= → ~\mathbf{}~,
+  ='c= → ~\mathcal{}~, ='B= → ~\mathbb{}~. Waiting pops up a hint window.
   The full table is ~cdlatex-math-modify-alist-comb~.
 
 - =_= and =^= insert ~_{}~ and ~^{}~ with point inside.
 
-- Environment templates expand with =TAB=: type =equ= then =TAB= for an
-  ~equation~ environment, or =env= / =beg= for a prompt. =TAB= then jumps
-  between the fields. This works while the Corfu popup is open — =TAB=
-  expands the keyword before point instead of picking a candidate.
+- Environment templates expand with =TAB=: type =equ= then =TAB= for an ~equation~
+  environment, or =env= / =beg= for a prompt. =TAB= then jumps between the fields.
+  This works while the Corfu popup is open — =TAB= expands the keyword before
+  point instead of picking a candidate.
 
 *** Snippets that expand as you type
 

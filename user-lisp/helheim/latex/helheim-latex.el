@@ -43,7 +43,9 @@
 
 (setup cdlatex
   (:install t)
-  (:setopt cdlatex-auto-help-delay 0.5)
+  (:setopt cdlatex-auto-help-delay 0.5
+           cdlatex-math-symbol-alist '((?| "\\mid" "\\mapsto" "\\longmapsto"))
+           cdlatex-math-modify-alist '((?B "\\mathbb" nil t nil nil)))
   (:hook org-mode-hook turn-on-org-cdlatex))
 
 (setup corfu
@@ -84,8 +86,15 @@
       "inn" "\\in"
       "notin" "\\notin"
 
-      ;; Sized delimiters. Doubled, like `//', so a single `(' still stays a
-      ;; plain paren. `<<' is left out -- it is more often wanted as \ll.
+      ;; Number sets
+      "NN" "\\mathbb{N}"
+      "ZZ" "\\mathbb{Z}"
+      "QQ" "\\mathbb{Q}"
+      "RR" "\\mathbb{R}"
+      "CC" "\\mathbb{C}"
+
+      ;; Sized delimiters. Doubled, like `//', so a single `(' still stays
+      ;; a plain paren. `<<' is left out -- it is more often wanted as \ll.
       "((" #'+latex-insert-delimiters
       "[[" #'+latex-insert-delimiters
       "{{" #'+latex-insert-delimiters
@@ -120,7 +129,7 @@
   (:setopt cdlatex-use-dollar-to-ensure-math nil
            math-delimiters-inline  '("\\(" . "\\)")
            math-delimiters-display '("\\[" . "\\]")
-           math-delimiters-compressed-display-math nil))
+           math-delimiters-compressed-display-math t))
 
 ;;;; lazytab — matrix / array entry
 
