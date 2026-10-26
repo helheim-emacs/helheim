@@ -1,25 +1,24 @@
 * helheim-latex — fast LaTeX-math entry in Org mode
 
-Typing math in Org notes: CDLaTeX for key-triggered insertion, a small set
-of snippets that expand as you type, smart =$=, matrix entry, and inline
-previews that toggle themselves.
+Typing math in Org notes: CDLaTeX for key-triggered insertion, a small set of
+snippets that expand as you type, smart =$=, matrix entry, and inline previews
+that update while you type.
 
 ** Requirements
 
-- ~xelatex~ (TeX Live) — compiles the fragments.
-- ~dvisvgm~ — turns them into resolution-independent SVGs.
-
-AUCTeX is installed as a dependency: Org's ~org-cdlatex-mode~ needs
-~texmathp~ from it.
+- Org 10.0 or later (for its new ~org-latex-preview-mode~).
 
 ** Preview
 
-~org-fragtog~ toggles each fragment: with the cursor *on* it you see the
-LaTeX source, with the cursor *away* the rendered SVG. Previews are on
-at file open and cached by fragment hash.
+~org-latex-preview-mode~ shows each fragment as an image. When you move the
+cursor onto a fragment, you see its LaTeX source. When you move away, you see
+the image again. While you edit a fragment, a live preview is drawn next to
+it and updates as you type. Previews are on when a file opens, and they stay
+cached across Emacs sessions.
 
-Toggle one manually with =SPC t l=; a prefix argument (=C-u=) previews
-a wider scope.
+Toggle one fragment by hand with =SPC t l=. With =C-u=, the same key clears
+the previews in the current entry. To change the size of the images, set
+the ~:zoom~ property in ~org-latex-preview-appearance-options~.
 
 ** Fast typing math
 *** CDLaTeX
@@ -60,6 +59,11 @@ No trigger key. They fire only inside math, so prose is never touched.
 | =AA=    | ~\forall~          |
 | =inn=   | ~\in~          |
 | =notin= | ~\notin~          |
+| =NN=    | ~\mathbb{N}~ |
+| =ZZ=    | ~\mathbb{Z}~ |
+| =QQ=    | ~\mathbb{Q}~ |
+| =RR=    | ~\mathbb{R}~ |
+| =CC=    | ~\mathbb{C}~ |
 
 **** Fractions — =//=
 
@@ -147,5 +151,5 @@ reads the delimiter from the key that invoked it:
 
 With an active region it surrounds the region — select with a motion, then
 wrap. Inside math with no region it surrounds the TeX object right before
-point, so =x^2= becomes ~\left( x^2 \right)~. With neither, it inserts an
-empty pair and leaves point inside.
+point, so =x^2= becomes ~\left( x^2 \right)~. With neither, it inserts an empty
+pair and leaves point inside.

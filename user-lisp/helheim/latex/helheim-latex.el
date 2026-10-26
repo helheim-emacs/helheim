@@ -1,4 +1,4 @@
-;;; helheim-latex.el              -*- lexical-binding: t; no-byte-compile: t -*-
+;;; helheim-latex.el -*- lexical-binding: t; no-byte-compile: t -*-
 ;;; Commentary:
 ;;
 ;; Fast LaTeX-math entry for Org notes (math study). This follows what
@@ -19,10 +19,6 @@
 ;;   lazytab   — amsmath matrix / array entry via orgtbl syntax
 ;;               (provisional in Org; see the note below).
 ;;
-;; Live preview goes through `org-latex-preview' plus `org-fragtog', set up in
-;; the "Live preview" section below: the `xelatex' process (xdv converted to
-;; svg), and `:scale' in `org-format-latex-options'. Both are `:setopt'
-;; defaults, so a setting in init.el always wins.
 ;;
 ;;; Code:
 ;;;; texmathp (via AUCTeX)
@@ -126,11 +122,6 @@
            math-delimiters-display '("\\[" . "\\]")
            math-delimiters-compressed-display-math nil))
 
-(define-advice math-delimiters-insert (:after (&rest _) org-fragtog-fix)
-  "Keep `org-fragtog' from moving point."
-  (when (bound-and-true-p org-fragtog-mode)
-    (setq org-fragtog--prev-point (point))))
-
 ;;;; lazytab — matrix / array entry
 
 ;; lazytab is undocumented and built primarily for LaTeX-mode buffers,
@@ -165,26 +156,20 @@
   (insert "bmat")
   (cdlatex-tab))
 
-;;;; Live preview (classic org-latex-preview + org-fragtog)
+;;;; Preview
 
-(setup org-fragtog
-  (:install t)
-  (:after org)
-  (:hook org-mode-hook org-fragtog-mode)
+;; Requires Org 10.0
+(setup org-latex-preview
+  (:hook org-mode-hook org-latex-preview-mode)
   (:setopt org-startup-with-latex-preview t
-           org-preview-latex-default-process 'xelatex
-           ;; `\pgfsysdriver' override must stay ahead of `\usepackage{tikz}'.
-           ;; Without it TikZ draws with pdf specials that dvisvgm cannot read,
-           ;; and every line and arrowhead is silently dropped from the preview.
+           org-latex-preview-process-default 'dvisvgm
+           org-latex-preview-mode-display-live t
+           org-latex-preview-mode-update-delay 0.25
            org-latex-packages-alist
-           '("\\ifdefined\\XeTeXrevision\\def\\pgfsysdriver{pgfsys-dvisvgm.def}\\fi"
+           '(("T2A" "fontenc" t ("pdflatex"))
+             "\\ifdefined\\XeTeXrevision\\def\\pgfsysdriver{pgfsys-dvisvgm.def}\\fi"
              ("" "tikz" t)
-             "\\usetikzlibrary{arrows.meta,positioning,calc,decorations.pathreplacing,patterns,matrix,fit,backgrounds}")
-           ;; `plist-put' mutates in place, and this variable shares structure
-           ;; with its own `standard-value'. So copy it first to not break the
-           ;; `:setopt' compare with default mechanism.
-           org-format-latex-options (-> (copy-sequence org-format-latex-options)
-                                        (plist-put :scale 1.1))))
+             "\\usetikzlibrary{arrows.meta,positioning,calc,decorations.pathreplacing,patterns,matrix,fit,backgrounds}")))
 
 ;;;; Keys
 
